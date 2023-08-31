@@ -538,10 +538,11 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 		err := api.datastore.SaveValidatorRegistration(valReg)
 		if err != nil {
 			api.log.WithError(err).WithFields(logrus.Fields{
-				"reg_pubkey":       valReg.Message.Pubkey,
-				"reg_feeRecipient": valReg.Message.FeeRecipient,
-				"reg_gasLimit":     valReg.Message.GasLimit,
-				"reg_timestamp":    valReg.Message.Timestamp,
+				"reg_pubkey":              valReg.Message.Pubkey,
+				"reg_feeRecipient":        valReg.Message.FeeRecipient,
+				"reg_gasLimit":            valReg.Message.GasLimit,
+				"reg_timestamp":           valReg.Message.Timestamp,
+				"reg_proposer_commitment": valReg.Message.ProposerCommitment,
 			}).Error("error saving validator registration")
 		}
 	}
@@ -865,6 +866,7 @@ func (api *RelayAPI) handleRegisterValidator(w http.ResponseWriter, req *http.Re
 		"headSlot":      api.headSlot.Load(),
 		"contentLength": req.ContentLength,
 	})
+	log.Infof("DEBUGGG: handleRegisterValidator request received!!")
 
 	start := time.Now().UTC()
 	registrationTimestampUpperBound := start.Unix() + 10 // 10 seconds from now
@@ -898,6 +900,7 @@ func (api *RelayAPI) handleRegisterValidator(w http.ResponseWriter, req *http.Re
 	req.Body.Close()
 
 	parseRegistration := func(value []byte) (reg *boostTypes.SignedValidatorRegistration, err error) {
+		log.Infof("DEBUGGG: processing registration message: %s", string(value))
 		// Pubkey
 		_pubkey, err := jsonparser.GetUnsafeString(value, "message", "pubkey")
 		if err != nil {
@@ -953,13 +956,24 @@ func (api *RelayAPI) handleRegisterValidator(w http.ResponseWriter, req *http.Re
 			return nil, fmt.Errorf("registration message error (signature): %w", err)
 		}
 
+		_proposerCommitment, err := jsonparser.GetUnsafeString(value, "message", "proposer_commitment")
+		if err != nil {
+			return nil, fmt.Errorf("this is a registration message error! (proposerCommitment): %w", err)
+		}
+
+		proposerCommitment, err := strconv.ParseUint(_proposerCommitment, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid propser commitment: %w", err)
+		}
+
 		// Construct and return full registration object
 		reg = &boostTypes.SignedValidatorRegistration{
 			Message: &boostTypes.RegisterValidatorRequestMessage{
-				FeeRecipient: feeRecipient,
-				GasLimit:     gasLimit,
-				Timestamp:    timestamp,
-				Pubkey:       pubkey,
+				FeeRecipient:       feeRecipient,
+				GasLimit:           gasLimit,
+				Timestamp:          timestamp,
+				Pubkey:             pubkey,
+				ProposerCommitment: proposerCommitment,
 			},
 			Signature: signature,
 		}
@@ -989,11 +1003,12 @@ func (api *RelayAPI) handleRegisterValidator(w http.ResponseWriter, req *http.Re
 		// Add validator pubkey to logs
 		pkHex := signedValidatorRegistration.Message.Pubkey.PubkeyHex()
 		regLog = regLog.WithFields(logrus.Fields{
-			"pubkey":       pkHex,
-			"signature":    signedValidatorRegistration.Signature.String(),
-			"feeRecipient": signedValidatorRegistration.Message.FeeRecipient.String(),
-			"gasLimit":     signedValidatorRegistration.Message.GasLimit,
-			"timestamp":    signedValidatorRegistration.Message.Timestamp,
+			"pubkey":             pkHex,
+			"signature":          signedValidatorRegistration.Signature.String(),
+			"feeRecipient":       signedValidatorRegistration.Message.FeeRecipient.String(),
+			"gasLimit":           signedValidatorRegistration.Message.GasLimit,
+			"timestamp":          signedValidatorRegistration.Message.Timestamp,
+			"proposerCommitment": &signedValidatorRegistration.Message.ProposerCommitment,
 		})
 
 		// Ensure a valid timestamp (not too early, and not too far in the future)

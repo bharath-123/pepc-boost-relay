@@ -127,19 +127,19 @@ func (s *DatabaseService) NumValidatorRegistrationRows() (count uint64, err erro
 
 func (s *DatabaseService) SaveValidatorRegistration(entry ValidatorRegistrationEntry) error {
 	query := `WITH latest_registration AS (
-		SELECT DISTINCT ON (pubkey) pubkey, fee_recipient, timestamp, gas_limit, signature FROM ` + vars.TableValidatorRegistration + ` WHERE pubkey=:pubkey ORDER BY pubkey, timestamp DESC limit 1
+		SELECT DISTINCT ON (pubkey) pubkey, fee_recipient, timestamp, gas_limit, signature, proposer_commitment FROM ` + vars.TableValidatorRegistration + ` WHERE pubkey=:pubkey ORDER BY pubkey, timestamp DESC limit 1
 	)
-	INSERT INTO ` + vars.TableValidatorRegistration + ` (pubkey, fee_recipient, timestamp, gas_limit, signature)
-	SELECT :pubkey, :fee_recipient, :timestamp, :gas_limit, :signature
+	INSERT INTO ` + vars.TableValidatorRegistration + ` (pubkey, fee_recipient, timestamp, gas_limit, signature, proposer_commitment)
+	SELECT :pubkey, :fee_recipient, :timestamp, :gas_limit, :signature, :proposer_commitment
 	WHERE NOT EXISTS (
-		SELECT 1 from latest_registration WHERE pubkey=:pubkey AND :timestamp <= latest_registration.timestamp OR (:fee_recipient = latest_registration.fee_recipient AND :gas_limit = latest_registration.gas_limit)
+		SELECT 1 from latest_registration WHERE pubkey=:pubkey AND :timestamp <= latest_registration.timestamp OR (:fee_recipient = latest_registration.fee_recipient AND :gas_limit = latest_registration.gas_limit AND :proposer_commitment = latest_registration.proposer_commitment)
 	);`
 	_, err := s.DB.NamedExec(query, entry)
 	return err
 }
 
 func (s *DatabaseService) GetValidatorRegistration(pubkey string) (*ValidatorRegistrationEntry, error) {
-	query := `SELECT DISTINCT ON (pubkey) pubkey, fee_recipient, timestamp, gas_limit, signature
+	query := `SELECT DISTINCT ON (pubkey) pubkey, fee_recipient, timestamp, gas_limit, proposer_commitment, signature
 		FROM ` + vars.TableValidatorRegistration + `
 		WHERE pubkey=$1
 		ORDER BY pubkey, timestamp DESC;`
@@ -149,7 +149,7 @@ func (s *DatabaseService) GetValidatorRegistration(pubkey string) (*ValidatorReg
 }
 
 func (s *DatabaseService) GetValidatorRegistrationsForPubkeys(pubkeys []string) (entries []*ValidatorRegistrationEntry, err error) {
-	query := `SELECT DISTINCT ON (pubkey) pubkey, fee_recipient, timestamp, gas_limit, signature
+	query := `SELECT DISTINCT ON (pubkey) pubkey, fee_recipient, timestamp, gas_limit, proposer_commitment, signature
 		FROM ` + vars.TableValidatorRegistration + `
 		WHERE pubkey IN (?)
 		ORDER BY pubkey, timestamp DESC;`
@@ -164,7 +164,7 @@ func (s *DatabaseService) GetValidatorRegistrationsForPubkeys(pubkeys []string) 
 
 func (s *DatabaseService) GetLatestValidatorRegistrations(timestampOnly bool) ([]*ValidatorRegistrationEntry, error) {
 	// query details: https://stackoverflow.com/questions/3800551/select-first-row-in-each-group-by-group/7630564#7630564
-	query := `SELECT DISTINCT ON (pubkey) pubkey, fee_recipient, timestamp, gas_limit, signature`
+	query := `SELECT DISTINCT ON (pubkey) pubkey, fee_recipient, timestamp, gas_limit, proposer_commitment, signature`
 	if timestampOnly {
 		query = `SELECT DISTINCT ON (pubkey) pubkey, timestamp`
 	}

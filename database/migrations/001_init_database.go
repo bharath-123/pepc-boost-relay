@@ -16,6 +16,7 @@ var Migration001InitDatabase = &migrate.Migration{
 			fee_recipient varchar(42) NOT NULL,
 			timestamp     bigint NOT NULL,
 			gas_limit     bigint NOT NULL,
+			proposer_commitment bigint NOT NULL,
 			signature     text NOT NULL
 		);
 
