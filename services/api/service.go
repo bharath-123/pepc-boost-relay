@@ -1614,10 +1614,373 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 }
 
 func (api *RelayAPI) handleSubmitNewTobBlock(w http.ResponseWriter, req *http.Request) {
+	// ignore if proposer_commitment is FULL_BLOCK
+	// We first do all sanity checks we normally do for a block submitted by a builder
+	// START: COPIED FROM handleSubmitNewBlock
+	var pf common.Profile
+	var prevTime, nextTime time.Time
+
+	headSlot := api.headSlot.Load()
+	receivedAt := time.Now().UTC()
+	prevTime = receivedAt
+
+	log := api.log.WithFields(logrus.Fields{
+		"method":                "submitNewBlock",
+		"contentLength":         req.ContentLength,
+		"headSlot":              headSlot,
+		"timestampRequestStart": receivedAt.UnixMilli(),
+	})
+
+	// Log at start and end of request
+	log.Info("request initiated")
+	defer func() {
+		log.WithFields(logrus.Fields{
+			"timestampRequestFin": time.Now().UTC().UnixMilli(),
+			"requestDurationMs":   time.Since(receivedAt).Milliseconds(),
+		}).Info("request finished")
+	}()
+
+	var err error
+	var r io.Reader = req.Body
+	isGzip := req.Header.Get("Content-Encoding") == "gzip"
+	log = log.WithField("reqIsGzip", isGzip)
+	if isGzip {
+		r, err = gzip.NewReader(req.Body)
+		if err != nil {
+			log.WithError(err).Warn("could not create gzip reader")
+			api.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	limitReader := io.LimitReader(r, 10*1024*1024) // 10 MB
+	requestPayloadBytes, err := io.ReadAll(limitReader)
+	if err != nil {
+		log.WithError(err).Warn("could not read payload")
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	payload := new(common.BuilderSubmitBlockRequest)
+
+	// Check for SSZ encoding
+	contentType := req.Header.Get("Content-Type")
+	if contentType == "application/octet-stream" {
+		log = log.WithField("reqContentType", "ssz")
+		payload.Capella = new(builderCapella.SubmitBlockRequest)
+		if err = payload.Capella.UnmarshalSSZ(requestPayloadBytes); err != nil {
+			log.WithError(err).Warn("could not decode payload - SSZ")
+
+			// SSZ decoding failed. try JSON as fallback (some builders used octet-stream for json before)
+			if err2 := json.Unmarshal(requestPayloadBytes, payload); err2 != nil {
+				log.WithError(fmt.Errorf("%w / %w", err, err2)).Warn("could not decode payload - SSZ or JSON")
+				api.RespondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			log = log.WithField("reqContentType", "json")
+		} else {
+			log.Debug("received ssz-encoded payload")
+		}
+	} else {
+		log = log.WithField("reqContentType", "json")
+		if err := json.Unmarshal(requestPayloadBytes, payload); err != nil {
+			log.WithError(err).Warn("could not decode payload - JSON")
+			api.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	nextTime = time.Now().UTC()
+	pf.Decode = uint64(nextTime.Sub(prevTime).Microseconds())
+	prevTime = nextTime
+
+	isLargeRequest := len(requestPayloadBytes) > fastTrackPayloadSizeLimit
+	log = log.WithFields(logrus.Fields{
+		"timestampAfterDecoding": time.Now().UTC().UnixMilli(),
+		"slot":                   payload.Slot(),
+		"builderPubkey":          payload.BuilderPubkey().String(),
+		"blockHash":              payload.BlockHash(),
+		"proposerPubkey":         payload.ProposerPubkey(),
+		"parentHash":             payload.ParentHash(),
+		"value":                  payload.Value().String(),
+		"numTx":                  payload.NumTx(),
+		"payloadBytes":           len(requestPayloadBytes),
+		"isLargeRequest":         isLargeRequest,
+	})
+
+	if payload.Message() == nil || !payload.HasExecutionPayload() {
+		api.RespondError(w, http.StatusBadRequest, "missing parts of the payload")
+		return
+	}
+
+	ok := api.checkSubmissionSlotDetails(w, log, headSlot, payload)
+	if !ok {
+		return
+	}
+
+	builderPubkey := payload.BuilderPubkey()
+	builderEntry, ok := api.checkBuilderEntry(w, log, builderPubkey)
+	if !ok {
+		return
+	}
+
+	log = log.WithFields(logrus.Fields{
+		"builderIsHighPrio":     builderEntry.status.IsHighPrio,
+		"timestampAfterChecks1": time.Now().UTC().UnixMilli(),
+	})
+
+	_, ok = api.checkSubmissionFeeRecipient(w, log, payload)
+	if !ok {
+		return
+	}
+
+	// Don't accept blocks with 0 value
+	if payload.Value().Cmp(ZeroU256.BigInt()) == 0 || payload.NumTx() == 0 {
+		log.Info("submitNewBlock failed: block with 0 value or no txs")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Sanity check the submission
+	err = SanityCheckBuilderBlockSubmission(payload)
+	if err != nil {
+		log.WithError(err).Info("block submission sanity checks failed")
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	log = log.WithField("timestampBeforeAttributesCheck", time.Now().UTC().UnixMilli())
+
+	ok = api.checkSubmissionPayloadAttrs(w, log, payload)
+	if !ok {
+		return
+	}
+
+	// Verify the signature
+	log = log.WithField("timestampBeforeSignatureCheck", time.Now().UTC().UnixMilli())
+	signature := payload.Signature()
+	ok, err = boostTypes.VerifySignature(payload.Message(), api.opts.EthNetDetails.DomainBuilder, builderPubkey[:], signature[:])
+	log = log.WithField("timestampAfterSignatureCheck", time.Now().UTC().UnixMilli())
+	if err != nil {
+		log.WithError(err).Warn("failed verifying builder signature")
+		api.RespondError(w, http.StatusBadRequest, "failed verifying builder signature")
+		return
+	} else if !ok {
+		log.Warn("invalid builder signature")
+		api.RespondError(w, http.StatusBadRequest, "invalid signature")
+		return
+	}
+
+	// Create the redis pipeline tx
+	tx := api.redis.NewTxPipeline()
+
+	//Reject new submissions once the payload for this slot was delivered
+	slotLastPayloadDelivered, err := api.redis.GetLastSlotDelivered(context.Background(), tx)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		log.WithError(err).Error("failed to get delivered payload slot from redis")
+	} else if payload.Slot() <= slotLastPayloadDelivered {
+		log.Info("rejecting submission because payload for this slot was already delivered")
+		api.RespondError(w, http.StatusBadRequest, "payload for this slot was already delivered")
+		return
+	}
+	// END: COPIED FROM handleSubmitNewBlock
+
+	// query for the highest ROB value from a builder for this slot, parent hash and pub key
+
+	// check if the value of the bid is the highest for this slot, parent hash and pub key
+
+	// if so assemble the payload
+
+	// if its not check if the TOB block is the highest TOB block for this slot, parent hash and pub key. if so simulate it and store it if successful
+
+	// build an aggregate bid
+
+	// save to db
 
 }
 
 func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Request) {
+	// ignore if proposer_commitment is FULL_BLOCK
+	// We first do all sanity checks we normally do for a block submitted by a builder
+	// START: COPIED FROM handleSubmitNewBlock
+	var pf common.Profile
+	var prevTime, nextTime time.Time
+
+	headSlot := api.headSlot.Load()
+	receivedAt := time.Now().UTC()
+	prevTime = receivedAt
+
+	log := api.log.WithFields(logrus.Fields{
+		"method":                "submitNewBlock",
+		"contentLength":         req.ContentLength,
+		"headSlot":              headSlot,
+		"timestampRequestStart": receivedAt.UnixMilli(),
+	})
+
+	// Log at start and end of request
+	log.Info("request initiated")
+	defer func() {
+		log.WithFields(logrus.Fields{
+			"timestampRequestFin": time.Now().UTC().UnixMilli(),
+			"requestDurationMs":   time.Since(receivedAt).Milliseconds(),
+		}).Info("request finished")
+	}()
+
+	var err error
+	var r io.Reader = req.Body
+	isGzip := req.Header.Get("Content-Encoding") == "gzip"
+	log = log.WithField("reqIsGzip", isGzip)
+	if isGzip {
+		r, err = gzip.NewReader(req.Body)
+		if err != nil {
+			log.WithError(err).Warn("could not create gzip reader")
+			api.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	limitReader := io.LimitReader(r, 10*1024*1024) // 10 MB
+	requestPayloadBytes, err := io.ReadAll(limitReader)
+	if err != nil {
+		log.WithError(err).Warn("could not read payload")
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	payload := new(common.BuilderSubmitBlockRequest)
+
+	// Check for SSZ encoding
+	contentType := req.Header.Get("Content-Type")
+	if contentType == "application/octet-stream" {
+		log = log.WithField("reqContentType", "ssz")
+		payload.Capella = new(builderCapella.SubmitBlockRequest)
+		if err = payload.Capella.UnmarshalSSZ(requestPayloadBytes); err != nil {
+			log.WithError(err).Warn("could not decode payload - SSZ")
+
+			// SSZ decoding failed. try JSON as fallback (some builders used octet-stream for json before)
+			if err2 := json.Unmarshal(requestPayloadBytes, payload); err2 != nil {
+				log.WithError(fmt.Errorf("%w / %w", err, err2)).Warn("could not decode payload - SSZ or JSON")
+				api.RespondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			log = log.WithField("reqContentType", "json")
+		} else {
+			log.Debug("received ssz-encoded payload")
+		}
+	} else {
+		log = log.WithField("reqContentType", "json")
+		if err := json.Unmarshal(requestPayloadBytes, payload); err != nil {
+			log.WithError(err).Warn("could not decode payload - JSON")
+			api.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	nextTime = time.Now().UTC()
+	pf.Decode = uint64(nextTime.Sub(prevTime).Microseconds())
+	prevTime = nextTime
+
+	isLargeRequest := len(requestPayloadBytes) > fastTrackPayloadSizeLimit
+	log = log.WithFields(logrus.Fields{
+		"timestampAfterDecoding": time.Now().UTC().UnixMilli(),
+		"slot":                   payload.Slot(),
+		"builderPubkey":          payload.BuilderPubkey().String(),
+		"blockHash":              payload.BlockHash(),
+		"proposerPubkey":         payload.ProposerPubkey(),
+		"parentHash":             payload.ParentHash(),
+		"value":                  payload.Value().String(),
+		"numTx":                  payload.NumTx(),
+		"payloadBytes":           len(requestPayloadBytes),
+		"isLargeRequest":         isLargeRequest,
+	})
+
+	if payload.Message() == nil || !payload.HasExecutionPayload() {
+		api.RespondError(w, http.StatusBadRequest, "missing parts of the payload")
+		return
+	}
+
+	ok := api.checkSubmissionSlotDetails(w, log, headSlot, payload)
+	if !ok {
+		return
+	}
+
+	builderPubkey := payload.BuilderPubkey()
+	builderEntry, ok := api.checkBuilderEntry(w, log, builderPubkey)
+	if !ok {
+		return
+	}
+
+	log = log.WithFields(logrus.Fields{
+		"builderIsHighPrio":     builderEntry.status.IsHighPrio,
+		"timestampAfterChecks1": time.Now().UTC().UnixMilli(),
+	})
+
+	_, ok = api.checkSubmissionFeeRecipient(w, log, payload)
+	if !ok {
+		return
+	}
+
+	// Don't accept blocks with 0 value
+	if payload.Value().Cmp(ZeroU256.BigInt()) == 0 || payload.NumTx() == 0 {
+		log.Info("submitNewBlock failed: block with 0 value or no txs")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Sanity check the submission
+	err = SanityCheckBuilderBlockSubmission(payload)
+	if err != nil {
+		log.WithError(err).Info("block submission sanity checks failed")
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	log = log.WithField("timestampBeforeAttributesCheck", time.Now().UTC().UnixMilli())
+
+	ok = api.checkSubmissionPayloadAttrs(w, log, payload)
+	if !ok {
+		return
+	}
+
+	// Verify the signature
+	log = log.WithField("timestampBeforeSignatureCheck", time.Now().UTC().UnixMilli())
+	signature := payload.Signature()
+	ok, err = boostTypes.VerifySignature(payload.Message(), api.opts.EthNetDetails.DomainBuilder, builderPubkey[:], signature[:])
+	log = log.WithField("timestampAfterSignatureCheck", time.Now().UTC().UnixMilli())
+	if err != nil {
+		log.WithError(err).Warn("failed verifying builder signature")
+		api.RespondError(w, http.StatusBadRequest, "failed verifying builder signature")
+		return
+	} else if !ok {
+		log.Warn("invalid builder signature")
+		api.RespondError(w, http.StatusBadRequest, "invalid signature")
+		return
+	}
+
+	// Create the redis pipeline tx
+	tx := api.redis.NewTxPipeline()
+
+	// bchain - the check for whether the slot of the TOB payload has already been submitted is universal
+	//Reject new submissions once the payload for this slot was delivered - TODO: store in memory as well
+	slotLastPayloadDelivered, err := api.redis.GetLastSlotDelivered(context.Background(), tx)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		log.WithError(err).Error("failed to get delivered payload slot from redis")
+	} else if payload.Slot() <= slotLastPayloadDelivered {
+		log.Info("rejecting submission because payload for this slot was already delivered")
+		api.RespondError(w, http.StatusBadRequest, "payload for this slot was already delivered")
+		return
+	}
+	// END: COPIED FROM handleSubmitNewBlock
+
+	// query for the highest TOB value from a builder for this slot, parent hash and pub key
+
+	// check if the value of the bid is the highest for this slot, parent hash and pub key
+
+	// if so assemble the payload
+
+	// build an aggregate bid
+
+	// save to db
 
 }
 
@@ -1790,9 +2153,8 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	// Create the redis pipeline tx
 	tx := api.redis.NewTxPipeline()
 
-	// bchain - Here we will have to the last TOB slot which a TOB was delivered. We will have to namespace the entire
-	// db and redis caches into TOB and ROB
-	// Reject new submissions once the payload for this slot was delivered - TODO: store in memory as well
+	// bchain - the check for whether the slot of the TOB payload has already been submitted is universal
+	//Reject new submissions once the payload for this slot was delivered - TODO: store in memory as well
 	slotLastPayloadDelivered, err := api.redis.GetLastSlotDelivered(context.Background(), tx)
 	if err != nil && !errors.Is(err, redis.Nil) {
 		log.WithError(err).Error("failed to get delivered payload slot from redis")

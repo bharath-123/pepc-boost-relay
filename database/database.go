@@ -25,14 +25,45 @@ type IDatabaseService interface {
 	GetValidatorRegistration(pubkey string) (*ValidatorRegistrationEntry, error)
 	GetValidatorRegistrationsForPubkeys(pubkeys []string) ([]*ValidatorRegistrationEntry, error)
 
+	// Done
 	SaveBuilderBlockSubmission(payload *common.BuilderSubmitBlockRequest, requestError, validationError error, receivedAt, eligibleAt time.Time, wasSimulated, saveExecPayload bool, profile common.Profile, optimisticSubmission bool) (entry *BuilderBlockSubmissionEntry, err error)
+	SaveTobBuilderBlockSubmission(payload *common.BuilderSubmitBlockRequest, requestError, validationError error, receivedAt, eligibleAt time.Time, wasSimulated, saveExecPayload bool, profile common.Profile, optimisticSubmission bool) (entry *BuilderBlockSubmissionEntry, err error)
+	SaveRobBuilderBlockSubmission(payload *common.BuilderSubmitBlockRequest, requestError, validationError error, receivedAt, eligibleAt time.Time, wasSimulated, saveExecPayload bool, profile common.Profile, optimisticSubmission bool) (entry *BuilderBlockSubmissionEntry, err error)
+
+	// Done
 	GetBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error)
+	GetTobBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error)
+	GetRobBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error)
+
+	// Done
 	GetBuilderSubmissions(filters GetBuilderSubmissionsFilters) ([]*BuilderBlockSubmissionEntry, error)
+	GetTobBuilderSubmissions(filters GetBuilderSubmissionsFilters) ([]*BuilderBlockSubmissionEntry, error)
+	GetRobBuilderSubmissions(filters GetBuilderSubmissionsFilters) ([]*BuilderBlockSubmissionEntry, error)
+
+	// Done
 	GetBuilderSubmissionsBySlots(slotFrom, slotTo uint64) (entries []*BuilderBlockSubmissionEntry, err error)
+	GetTobBuilderSubmissionsBySlots(slotFrom, slotTo uint64) (entries []*BuilderBlockSubmissionEntry, err error)
+	GetRobBuilderSubmissionsBySlots(slotFrom, slotTo uint64) (entries []*BuilderBlockSubmissionEntry, err error)
+
+	// Done
 	GetExecutionPayloadEntryByID(executionPayloadID int64) (entry *ExecutionPayloadEntry, err error)
+	GetTobExecutionPayloadEntryByID(executionPayloadID int64) (entry *ExecutionPayloadEntry, err error)
+	GetRobExecutionPayloadEntryByID(executionPayloadID int64) (entry *ExecutionPayloadEntry, err error)
+
+	// Done
 	GetExecutionPayloadEntryBySlotPkHash(slot uint64, proposerPubkey, blockHash string) (entry *ExecutionPayloadEntry, err error)
+	GetTobExecutionPayloadEntryBySlotPkHash(slot uint64, proposerPubkey, blockHash string) (entry *ExecutionPayloadEntry, err error)
+	GetRobExecutionPayloadEntryBySlotPkHash(slot uint64, proposerPubkey, blockHash string) (entry *ExecutionPayloadEntry, err error)
+
+	// Done
 	GetExecutionPayloads(idFirst, idLast uint64) (entries []*ExecutionPayloadEntry, err error)
+	GetTobExecutionPayloads(idFirst, idLast uint64) (entries []*ExecutionPayloadEntry, err error)
+	GetRobExecutionPayloads(idFirst, idLast uint64) (entries []*ExecutionPayloadEntry, err error)
+
+	// Done
 	DeleteExecutionPayloads(idFirst, idLast uint64) error
+	DeleteTobExecutionPayloads(idFirst, idLast uint64) error
+	DeleteRobExecutionPayloads(idFirst, idLast uint64) error
 
 	SaveDeliveredPayload(bidTrace *common.BidTraceV2, signedBlindedBeaconBlock *common.SignedBlindedBeaconBlock, signedAt time.Time, publishMs uint64) error
 	GetNumDeliveredPayloads() (uint64, error)
@@ -60,6 +91,12 @@ type DatabaseService struct {
 
 	nstmtInsertExecutionPayload       *sqlx.NamedStmt
 	nstmtInsertBlockBuilderSubmission *sqlx.NamedStmt
+
+	nstmtInsertTobExecutionPayload       *sqlx.NamedStmt
+	nstmtInsertTobBlockBuilderSubmission *sqlx.NamedStmt
+
+	nstmtInsertRobExecutionPayload       *sqlx.NamedStmt
+	nstmtInsertRobBlockBuilderSubmission *sqlx.NamedStmt
 }
 
 func NewDatabaseService(dsn string) (*DatabaseService, error) {
@@ -103,6 +140,51 @@ func (s *DatabaseService) prepareNamedQueries() (err error) {
 	(:received_at, :eligible_at, :execution_payload_id, :was_simulated, :sim_success, :sim_error, :sim_req_error, :signature, :slot, :parent_hash, :block_hash, :builder_pubkey, :proposer_pubkey, :proposer_fee_recipient, :gas_used, :gas_limit, :num_tx, :value, :epoch, :block_number, :decode_duration, :prechecks_duration, :simulation_duration, :redis_update_duration, :total_duration, :optimistic_submission)
 	RETURNING id`
 	s.nstmtInsertBlockBuilderSubmission, err = s.DB.PrepareNamed(query)
+	if err != nil {
+		return err
+	}
+
+	// Insert TOB execution payload
+	query = `INSERT INTO ` + vars.TableTobExecutionPayload + `
+	(slot, proposer_pubkey, block_hash, version, payload) VALUES
+	(:slot, :proposer_pubkey, :block_hash, :version, :payload)
+	ON CONFLICT (slot, proposer_pubkey, block_hash) DO UPDATE SET slot=:slot
+	RETURNING id`
+	s.nstmtInsertTobExecutionPayload, err = s.DB.PrepareNamed(query)
+	if err != nil {
+		return err
+	}
+
+	// Insert TOB block builder submission
+	query = `INSERT INTO ` + vars.TableTobBuilderBlockSubmission + `
+	(received_at, eligible_at, execution_payload_id, was_simulated, sim_success, sim_error, sim_req_error, signature, slot, parent_hash, block_hash, builder_pubkey, proposer_pubkey, proposer_fee_recipient, gas_used, gas_limit, num_tx, value, epoch, block_number, decode_duration, prechecks_duration, simulation_duration, redis_update_duration, total_duration, optimistic_submission) VALUES
+	(:received_at, :eligible_at, :execution_payload_id, :was_simulated, :sim_success, :sim_error, :sim_req_error, :signature, :slot, :parent_hash, :block_hash, :builder_pubkey, :proposer_pubkey, :proposer_fee_recipient, :gas_used, :gas_limit, :num_tx, :value, :epoch, :block_number, :decode_duration, :prechecks_duration, :simulation_duration, :redis_update_duration, :total_duration, :optimistic_submission)
+	RETURNING id`
+	s.nstmtInsertTobBlockBuilderSubmission, err = s.DB.PrepareNamed(query)
+	if err != nil {
+		return err
+	}
+
+	// Insert ROB execution payload
+	query = `INSERT INTO ` + vars.TableRobExecutionPayload + `
+	(slot, proposer_pubkey, block_hash, version, payload) VALUES
+	(:slot, :proposer_pubkey, :block_hash, :version, :payload)
+	ON CONFLICT (slot, proposer_pubkey, block_hash) DO UPDATE SET slot=:slot
+	RETURNING id`
+	s.nstmtInsertRobExecutionPayload, err = s.DB.PrepareNamed(query)
+	if err != nil {
+		return err
+	}
+
+	// Insert ROB block builder submission
+	query = `INSERT INTO ` + vars.TableRobBuilderBlockSubmission + `
+	(received_at, eligible_at, execution_payload_id, was_simulated, sim_success, sim_error, sim_req_error, signature, slot, parent_hash, block_hash, builder_pubkey, proposer_pubkey, proposer_fee_recipient, gas_used, gas_limit, num_tx, value, epoch, block_number, decode_duration, prechecks_duration, simulation_duration, redis_update_duration, total_duration, optimistic_submission) VALUES
+	(:received_at, :eligible_at, :execution_payload_id, :was_simulated, :sim_success, :sim_error, :sim_req_error, :signature, :slot, :parent_hash, :block_hash, :builder_pubkey, :proposer_pubkey, :proposer_fee_recipient, :gas_used, :gas_limit, :num_tx, :value, :epoch, :block_number, :decode_duration, :prechecks_duration, :simulation_duration, :redis_update_duration, :total_duration, :optimistic_submission)
+	RETURNING id`
+	s.nstmtInsertRobBlockBuilderSubmission, err = s.DB.PrepareNamed(query)
+	if err != nil {
+		return err
+	}
 	return err
 }
 
@@ -240,9 +322,161 @@ func (s *DatabaseService) SaveBuilderBlockSubmission(payload *common.BuilderSubm
 	return blockSubmissionEntry, err
 }
 
+func (s *DatabaseService) SaveTobBuilderBlockSubmission(payload *common.BuilderSubmitBlockRequest, requestError, validationError error, receivedAt, eligibleAt time.Time, wasSimulated, saveExecPayload bool, profile common.Profile, optimisticSubmission bool) (entry *BuilderBlockSubmissionEntry, err error) {
+	// Save execution_payload: insert, or if already exists update to be able to return the id ('on conflict do nothing' doesn't return an id)
+	execPayloadEntry, err := PayloadToExecPayloadEntry(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	if saveExecPayload {
+		err = s.nstmtInsertExecutionPayload.QueryRow(execPayloadEntry).Scan(&execPayloadEntry.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Save block_submission
+	simErrStr := ""
+	if validationError != nil {
+		simErrStr = validationError.Error()
+	}
+
+	requestErrStr := ""
+	if requestError != nil {
+		requestErrStr = requestError.Error()
+	}
+
+	blockSubmissionEntry := &BuilderBlockSubmissionEntry{
+		ReceivedAt:         NewNullTime(receivedAt),
+		EligibleAt:         NewNullTime(eligibleAt),
+		ExecutionPayloadID: NewNullInt64(execPayloadEntry.ID),
+
+		WasSimulated: wasSimulated,
+		SimSuccess:   wasSimulated && validationError == nil,
+		SimError:     simErrStr,
+		SimReqError:  requestErrStr,
+
+		Signature: payload.Signature().String(),
+
+		Slot:       payload.Slot(),
+		BlockHash:  payload.BlockHash(),
+		ParentHash: payload.ParentHash(),
+
+		BuilderPubkey:        payload.BuilderPubkey().String(),
+		ProposerPubkey:       payload.ProposerPubkey(),
+		ProposerFeeRecipient: payload.ProposerFeeRecipient(),
+
+		GasUsed:  payload.GasUsed(),
+		GasLimit: payload.GasLimit(),
+
+		NumTx: uint64(payload.NumTx()),
+		Value: payload.Value().String(),
+
+		Epoch:       payload.Slot() / common.SlotsPerEpoch,
+		BlockNumber: payload.BlockNumber(),
+
+		DecodeDuration:       profile.Decode,
+		PrechecksDuration:    profile.Prechecks,
+		SimulationDuration:   profile.Simulation,
+		RedisUpdateDuration:  profile.RedisUpdate,
+		TotalDuration:        profile.Total,
+		OptimisticSubmission: optimisticSubmission,
+	}
+	err = s.nstmtInsertTobBlockBuilderSubmission.QueryRow(blockSubmissionEntry).Scan(&blockSubmissionEntry.ID)
+	return blockSubmissionEntry, err
+}
+
+func (s *DatabaseService) SaveRobBuilderBlockSubmission(payload *common.BuilderSubmitBlockRequest, requestError, validationError error, receivedAt, eligibleAt time.Time, wasSimulated, saveExecPayload bool, profile common.Profile, optimisticSubmission bool) (entry *BuilderBlockSubmissionEntry, err error) {
+	// Save execution_payload: insert, or if already exists update to be able to return the id ('on conflict do nothing' doesn't return an id)
+	execPayloadEntry, err := PayloadToExecPayloadEntry(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	if saveExecPayload {
+		err = s.nstmtInsertExecutionPayload.QueryRow(execPayloadEntry).Scan(&execPayloadEntry.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Save block_submission
+	simErrStr := ""
+	if validationError != nil {
+		simErrStr = validationError.Error()
+	}
+
+	requestErrStr := ""
+	if requestError != nil {
+		requestErrStr = requestError.Error()
+	}
+
+	blockSubmissionEntry := &BuilderBlockSubmissionEntry{
+		ReceivedAt:         NewNullTime(receivedAt),
+		EligibleAt:         NewNullTime(eligibleAt),
+		ExecutionPayloadID: NewNullInt64(execPayloadEntry.ID),
+
+		WasSimulated: wasSimulated,
+		SimSuccess:   wasSimulated && validationError == nil,
+		SimError:     simErrStr,
+		SimReqError:  requestErrStr,
+
+		Signature: payload.Signature().String(),
+
+		Slot:       payload.Slot(),
+		BlockHash:  payload.BlockHash(),
+		ParentHash: payload.ParentHash(),
+
+		BuilderPubkey:        payload.BuilderPubkey().String(),
+		ProposerPubkey:       payload.ProposerPubkey(),
+		ProposerFeeRecipient: payload.ProposerFeeRecipient(),
+
+		GasUsed:  payload.GasUsed(),
+		GasLimit: payload.GasLimit(),
+
+		NumTx: uint64(payload.NumTx()),
+		Value: payload.Value().String(),
+
+		Epoch:       payload.Slot() / common.SlotsPerEpoch,
+		BlockNumber: payload.BlockNumber(),
+
+		DecodeDuration:       profile.Decode,
+		PrechecksDuration:    profile.Prechecks,
+		SimulationDuration:   profile.Simulation,
+		RedisUpdateDuration:  profile.RedisUpdate,
+		TotalDuration:        profile.Total,
+		OptimisticSubmission: optimisticSubmission,
+	}
+	err = s.nstmtInsertRobBlockBuilderSubmission.QueryRow(blockSubmissionEntry).Scan(&blockSubmissionEntry.ID)
+	return blockSubmissionEntry, err
+}
+
 func (s *DatabaseService) GetBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error) {
 	query := `SELECT id, inserted_at, received_at, eligible_at, execution_payload_id, sim_success, sim_error, signature, slot, parent_hash, block_hash, builder_pubkey, proposer_pubkey, proposer_fee_recipient, gas_used, gas_limit, num_tx, value, epoch, block_number, decode_duration, prechecks_duration, simulation_duration, redis_update_duration, total_duration, optimistic_submission 
 	FROM ` + vars.TableBuilderBlockSubmission + `
+	WHERE slot=$1 AND proposer_pubkey=$2 AND block_hash=$3
+	ORDER BY builder_pubkey ASC
+	LIMIT 1`
+	entry = &BuilderBlockSubmissionEntry{}
+	err = s.DB.Get(entry, query, slot, proposerPubkey, blockHash)
+	return entry, err
+}
+
+func (s *DatabaseService) GetTobBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error) {
+	query := `SELECT id, inserted_at, received_at, eligible_at, execution_payload_id, sim_success, sim_error, signature, slot, parent_hash, block_hash, builder_pubkey, proposer_pubkey, proposer_fee_recipient, gas_used, gas_limit, num_tx, value, epoch, block_number, decode_duration, prechecks_duration, simulation_duration, redis_update_duration, total_duration, optimistic_submission 
+	FROM ` + vars.TableTobBuilderBlockSubmission + `
+	WHERE slot=$1 AND proposer_pubkey=$2 AND block_hash=$3
+	ORDER BY builder_pubkey ASC
+	LIMIT 1`
+	entry = &BuilderBlockSubmissionEntry{}
+	err = s.DB.Get(entry, query, slot, proposerPubkey, blockHash)
+	return entry, err
+}
+
+func (s *DatabaseService) GetRobBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error) {
+	query := `SELECT id, inserted_at, received_at, eligible_at, execution_payload_id, sim_success, sim_error, signature, slot, parent_hash, block_hash, builder_pubkey, proposer_pubkey, proposer_fee_recipient, gas_used, gas_limit, num_tx, value, epoch, block_number, decode_duration, prechecks_duration, simulation_duration, redis_update_duration, total_duration, optimistic_submission 
+	FROM ` + vars.TableRobBuilderBlockSubmission + `
 	WHERE slot=$1 AND proposer_pubkey=$2 AND block_hash=$3
 	ORDER BY builder_pubkey ASC
 	LIMIT 1`
@@ -258,9 +492,41 @@ func (s *DatabaseService) GetExecutionPayloadEntryByID(executionPayloadID int64)
 	return entry, err
 }
 
+func (s *DatabaseService) GetTobExecutionPayloadEntryByID(executionPayloadID int64) (entry *ExecutionPayloadEntry, err error) {
+	query := `SELECT id, inserted_at, slot, proposer_pubkey, block_hash, version, payload FROM ` + vars.TableTobExecutionPayload + ` WHERE id=$1`
+	entry = &ExecutionPayloadEntry{}
+	err = s.DB.Get(entry, query, executionPayloadID)
+	return entry, err
+}
+
+func (s *DatabaseService) GetRobExecutionPayloadEntryByID(executionPayloadID int64) (entry *ExecutionPayloadEntry, err error) {
+	query := `SELECT id, inserted_at, slot, proposer_pubkey, block_hash, version, payload FROM ` + vars.TableRobExecutionPayload + ` WHERE id=$1`
+	entry = &ExecutionPayloadEntry{}
+	err = s.DB.Get(entry, query, executionPayloadID)
+	return entry, err
+}
+
 func (s *DatabaseService) GetExecutionPayloadEntryBySlotPkHash(slot uint64, proposerPubkey, blockHash string) (entry *ExecutionPayloadEntry, err error) {
 	query := `SELECT id, inserted_at, slot, proposer_pubkey, block_hash, version, payload
 	FROM ` + vars.TableExecutionPayload + `
+	WHERE slot=$1 AND proposer_pubkey=$2 AND block_hash=$3`
+	entry = &ExecutionPayloadEntry{}
+	err = s.DB.Get(entry, query, slot, proposerPubkey, blockHash)
+	return entry, err
+}
+
+func (s *DatabaseService) GetTobExecutionPayloadEntryBySlotPkHash(slot uint64, proposerPubkey, blockHash string) (entry *ExecutionPayloadEntry, err error) {
+	query := `SELECT id, inserted_at, slot, proposer_pubkey, block_hash, version, payload
+	FROM ` + vars.TableTobExecutionPayload + `
+	WHERE slot=$1 AND proposer_pubkey=$2 AND block_hash=$3`
+	entry = &ExecutionPayloadEntry{}
+	err = s.DB.Get(entry, query, slot, proposerPubkey, blockHash)
+	return entry, err
+}
+
+func (s *DatabaseService) GetRobExecutionPayloadEntryBySlotPkHash(slot uint64, proposerPubkey, blockHash string) (entry *ExecutionPayloadEntry, err error) {
+	query := `SELECT id, inserted_at, slot, proposer_pubkey, block_hash, version, payload
+	FROM ` + vars.TableRobExecutionPayload + `
 	WHERE slot=$1 AND proposer_pubkey=$2 AND block_hash=$3`
 	entry = &ExecutionPayloadEntry{}
 	err = s.DB.Get(entry, query, slot, proposerPubkey, blockHash)
@@ -385,6 +651,118 @@ func (s *DatabaseService) GetNumDeliveredPayloads() (uint64, error) {
 	return count, err
 }
 
+func (s *DatabaseService) GetTobBuilderSubmissions(filters GetBuilderSubmissionsFilters) ([]*BuilderBlockSubmissionEntry, error) {
+	arg := map[string]interface{}{
+		"limit":          filters.Limit,
+		"slot":           filters.Slot,
+		"block_hash":     filters.BlockHash,
+		"block_number":   filters.BlockNumber,
+		"builder_pubkey": filters.BuilderPubkey,
+	}
+
+	fields := "id, inserted_at, received_at, eligible_at, slot, epoch, builder_pubkey, proposer_pubkey, proposer_fee_recipient, parent_hash, block_hash, block_number, num_tx, value, gas_used, gas_limit, optimistic_submission"
+	limit := "LIMIT :limit"
+
+	whereConds := []string{
+		"(sim_success = true OR optimistic_submission = true)",
+	}
+	if filters.Slot > 0 {
+		whereConds = append(whereConds, "slot = :slot")
+		limit = "" // remove the limit when filtering by slot
+	}
+	if filters.BlockNumber > 0 {
+		whereConds = append(whereConds, "block_number = :block_number")
+		limit = "" // remove the limit when filtering by block_number
+	}
+	if filters.BlockHash != "" {
+		whereConds = append(whereConds, "block_hash = :block_hash")
+		limit = "" // remove the limit when filtering by block_hash
+	}
+	if filters.BuilderPubkey != "" {
+		whereConds = append(whereConds, "builder_pubkey = :builder_pubkey")
+	}
+
+	where := ""
+	if len(whereConds) > 0 {
+		where = "WHERE " + strings.Join(whereConds, " AND ")
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM %s %s ORDER BY slot DESC, inserted_at DESC %s", fields, vars.TableTobBuilderBlockSubmission, where, limit)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	entries := []*BuilderBlockSubmissionEntry{}
+	rows, err := s.DB.NamedQueryContext(ctx, query, arg)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		entry := new(BuilderBlockSubmissionEntry)
+		err = rows.StructScan(entry)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func (s *DatabaseService) GetRobBuilderSubmissions(filters GetBuilderSubmissionsFilters) ([]*BuilderBlockSubmissionEntry, error) {
+	arg := map[string]interface{}{
+		"limit":          filters.Limit,
+		"slot":           filters.Slot,
+		"block_hash":     filters.BlockHash,
+		"block_number":   filters.BlockNumber,
+		"builder_pubkey": filters.BuilderPubkey,
+	}
+
+	fields := "id, inserted_at, received_at, eligible_at, slot, epoch, builder_pubkey, proposer_pubkey, proposer_fee_recipient, parent_hash, block_hash, block_number, num_tx, value, gas_used, gas_limit, optimistic_submission"
+	limit := "LIMIT :limit"
+
+	whereConds := []string{
+		"(sim_success = true OR optimistic_submission = true)",
+	}
+	if filters.Slot > 0 {
+		whereConds = append(whereConds, "slot = :slot")
+		limit = "" // remove the limit when filtering by slot
+	}
+	if filters.BlockNumber > 0 {
+		whereConds = append(whereConds, "block_number = :block_number")
+		limit = "" // remove the limit when filtering by block_number
+	}
+	if filters.BlockHash != "" {
+		whereConds = append(whereConds, "block_hash = :block_hash")
+		limit = "" // remove the limit when filtering by block_hash
+	}
+	if filters.BuilderPubkey != "" {
+		whereConds = append(whereConds, "builder_pubkey = :builder_pubkey")
+	}
+
+	where := ""
+	if len(whereConds) > 0 {
+		where = "WHERE " + strings.Join(whereConds, " AND ")
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM %s %s ORDER BY slot DESC, inserted_at DESC %s", fields, vars.TableRobBuilderBlockSubmission, where, limit)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	entries := []*BuilderBlockSubmissionEntry{}
+	rows, err := s.DB.NamedQueryContext(ctx, query, arg)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		entry := new(BuilderBlockSubmissionEntry)
+		err = rows.StructScan(entry)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
 func (s *DatabaseService) GetBuilderSubmissions(filters GetBuilderSubmissionsFilters) ([]*BuilderBlockSubmissionEntry, error) {
 	arg := map[string]interface{}{
 		"limit":          filters.Limit,
@@ -444,6 +822,26 @@ func (s *DatabaseService) GetBuilderSubmissions(filters GetBuilderSubmissionsFil
 func (s *DatabaseService) GetBuilderSubmissionsBySlots(slotFrom, slotTo uint64) (entries []*BuilderBlockSubmissionEntry, err error) {
 	query := `SELECT id, inserted_at, received_at, eligible_at, slot, epoch, builder_pubkey, proposer_pubkey, proposer_fee_recipient, parent_hash, block_hash, block_number, num_tx, value, gas_used, gas_limit
 	FROM ` + vars.TableBuilderBlockSubmission + `
+	WHERE sim_success = true AND slot >= $1 AND slot <= $2
+	ORDER BY slot ASC, inserted_at ASC`
+
+	err = s.DB.Select(&entries, query, slotFrom, slotTo)
+	return entries, err
+}
+
+func (s *DatabaseService) GetTobBuilderSubmissionsBySlots(slotFrom, slotTo uint64) (entries []*BuilderBlockSubmissionEntry, err error) {
+	query := `SELECT id, inserted_at, received_at, eligible_at, slot, epoch, builder_pubkey, proposer_pubkey, proposer_fee_recipient, parent_hash, block_hash, block_number, num_tx, value, gas_used, gas_limit
+	FROM ` + vars.TableTobBuilderBlockSubmission + `
+	WHERE sim_success = true AND slot >= $1 AND slot <= $2
+	ORDER BY slot ASC, inserted_at ASC`
+
+	err = s.DB.Select(&entries, query, slotFrom, slotTo)
+	return entries, err
+}
+
+func (s *DatabaseService) GetRobBuilderSubmissionsBySlots(slotFrom, slotTo uint64) (entries []*BuilderBlockSubmissionEntry, err error) {
+	query := `SELECT id, inserted_at, received_at, eligible_at, slot, epoch, builder_pubkey, proposer_pubkey, proposer_fee_recipient, parent_hash, block_hash, block_number, num_tx, value, gas_used, gas_limit
+	FROM ` + vars.TableRobBuilderBlockSubmission + `
 	WHERE sim_success = true AND slot >= $1 AND slot <= $2
 	ORDER BY slot ASC, inserted_at ASC`
 
@@ -530,8 +928,32 @@ func (s *DatabaseService) GetExecutionPayloads(idFirst, idLast uint64) (entries 
 	return entries, err
 }
 
+func (s *DatabaseService) GetTobExecutionPayloads(idFirst, idLast uint64) (entries []*ExecutionPayloadEntry, err error) {
+	query := `SELECT id, inserted_at, slot, proposer_pubkey, block_hash, version, payload FROM ` + vars.TableTobExecutionPayload + ` WHERE id >= $1 AND id <= $2 ORDER BY id ASC`
+	err = s.DB.Select(&entries, query, idFirst, idLast)
+	return entries, err
+}
+
+func (s *DatabaseService) GetRobExecutionPayloads(idFirst, idLast uint64) (entries []*ExecutionPayloadEntry, err error) {
+	query := `SELECT id, inserted_at, slot, proposer_pubkey, block_hash, version, payload FROM ` + vars.TableRobExecutionPayload + ` WHERE id >= $1 AND id <= $2 ORDER BY id ASC`
+	err = s.DB.Select(&entries, query, idFirst, idLast)
+	return entries, err
+}
+
 func (s *DatabaseService) DeleteExecutionPayloads(idFirst, idLast uint64) error {
 	query := `DELETE FROM ` + vars.TableExecutionPayload + ` WHERE id >= $1 AND id <= $2`
+	_, err := s.DB.Exec(query, idFirst, idLast)
+	return err
+}
+
+func (s *DatabaseService) DeleteTobExecutionPayloads(idFirst, idLast uint64) error {
+	query := `DELETE FROM ` + vars.TableTobExecutionPayload + ` WHERE id >= $1 AND id <= $2`
+	_, err := s.DB.Exec(query, idFirst, idLast)
+	return err
+}
+
+func (s *DatabaseService) DeleteRobExecutionPayloads(idFirst, idLast uint64) error {
+	query := `DELETE FROM ` + vars.TableRobExecutionPayload + ` WHERE id >= $1 AND id <= $2`
 	_, err := s.DB.Exec(query, idFirst, idLast)
 	return err
 }

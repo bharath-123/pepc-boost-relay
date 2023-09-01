@@ -189,6 +189,51 @@ func (ds *Datastore) SaveValidatorRegistration(entry types.SignedValidatorRegist
 	return nil
 }
 
+// GetGetTobPayloadResponse returns the getTobPayload response from memory or Redis or Database
+func (ds *Datastore) GetGetTobPayloadResponse(log *logrus.Entry, slot uint64, proposerPubkey, blockHash string) (*common.VersionedExecutionPayload, error) {
+	log = log.WithField("datastoreMethod", "GetGetTobPayloadResponse")
+	_proposerPubkey := strings.ToLower(proposerPubkey)
+	_blockHash := strings.ToLower(blockHash)
+
+	// 1. try to get from Redis
+	resp, err := ds.redis.GetExecutionPayloadCapella(slot, _proposerPubkey, _blockHash)
+	if errors.Is(err, redis.Nil) {
+		log.WithError(err).Warn("execution payload not found in redis")
+	} else if err != nil {
+		log.WithError(err).Error("error getting execution payload from redis")
+	} else {
+		log.Debug("getPayload response from redis")
+		return resp, nil
+	}
+
+	// 2. try to get from Memcached
+	if ds.memcached != nil {
+		resp, err = ds.memcached.GetExecutionPayload(slot, _proposerPubkey, _blockHash)
+		if errors.Is(err, memcache.ErrCacheMiss) {
+			log.WithError(err).Warn("execution payload not found in memcached")
+		} else if err != nil {
+			log.WithError(err).Error("error getting execution payload from memcached")
+		} else if resp != nil {
+			log.Debug("getPayload response from memcached")
+			return resp, nil
+		}
+	}
+
+	// 3. try to get from database (should not happen, it's just a backup)
+	executionPayloadEntry, err := ds.db.GetExecutionPayloadEntryBySlotPkHash(slot, proposerPubkey, blockHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		log.WithError(err).Warn("execution payload not found in database")
+		return nil, ErrExecutionPayloadNotFound
+	} else if err != nil {
+		log.WithError(err).Error("error getting execution payload from database")
+		return nil, err
+	}
+
+	// Got it from database, now deserialize execution payload and compile full response
+	log.Warn("getPayload response from database, primary storage failed")
+	return database.ExecutionPayloadEntryToExecutionPayload(executionPayloadEntry)
+}
+
 // GetGetPayloadResponse returns the getPayload response from memory or Redis or Database
 func (ds *Datastore) GetGetPayloadResponse(log *logrus.Entry, slot uint64, proposerPubkey, blockHash string) (*common.VersionedExecutionPayload, error) {
 	log = log.WithField("datastoreMethod", "GetGetPayloadResponse")
