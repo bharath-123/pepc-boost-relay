@@ -270,7 +270,7 @@ func (ds *Datastore) GetGetRobPayloadResponse(log *logrus.Entry, slot uint64, pr
 	executionPayloadEntry, err := ds.db.GetRobExecutionPayloadEntryBySlotPkHash(slot, proposerPubkey, blockHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		log.WithError(err).Warn("rob execution payload not found in database")
-		return nil, ErrTobExecutionPayloadNotFound
+		return nil, ErrRobExecutionPayloadNotFound
 	} else if err != nil {
 		log.WithError(err).Error("error getting rob execution payload from database")
 		return nil, err

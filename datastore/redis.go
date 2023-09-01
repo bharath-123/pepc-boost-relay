@@ -84,17 +84,36 @@ type RedisCache struct {
 	readonlyClient *redis.Client
 
 	// prefixes (keys generated with a function)
-	prefixGetHeaderResponse           string
-	prefixExecPayloadCapella          string
-	prefixTobExecPayloadCapella       string
-	prefixRobExecPayloadCapella       string
-	prefixBidTrace                    string
-	prefixBlockBuilderLatestBids      string // latest bid for a given slot
-	prefixBlockBuilderLatestBidsValue string // value of latest bid for a given slot
-	prefixBlockBuilderLatestBidsTime  string // when the request was received, to avoid older requests overwriting newer ones after a slot validation
-	prefixTopBidValue                 string
-	prefixFloorBid                    string
-	prefixFloorBidValue               string
+	prefixGetHeaderResponse    string
+	prefixGetTobHeaderResponse string
+	prefixGetRobHeaderResponse string
+
+	prefixExecPayloadCapella    string
+	prefixTobExecPayloadCapella string
+	prefixRobExecPayloadCapella string
+
+	prefixBidTrace    string
+	prefixTobBidTrace string
+	prefixRobBidTrace string
+
+	prefixBlockBuilderLatestBids    string // latest bid for a given slot
+	prefixBlockBuilderLatestTobBids string // latest tob bid for a given slot
+	prefixBlockBuilderLatestRobBids string // latest rob bid for a given slot
+
+	prefixBlockBuilderLatestBidsValue    string // value of latest bid for a given slot
+	prefixBlockBuilderLatestTobBidsValue string // value of latest tob bid for a given slot
+	prefixBlockBuilderLatestRobBidsValue string // value of latest rob bid for a given slot
+
+	prefixBlockBuilderLatestBidsTime    string // when the request was received, to avoid older requests overwriting newer ones after a slot validation
+	prefixBlockBuilderLatestTobBidsTime string // when the request was received, to avoid older requests overwriting newer ones after a slot validation
+	prefixBlockBuilderLatestRobBidsTime string // when the request was received, to avoid older requests overwriting newer ones after a slot validation
+
+	prefixTopBidValue    string
+	prefixTopTobBidValue string
+	prefixTopRobBidValue string
+
+	prefixFloorBid      string
+	prefixFloorBidValue string
 
 	// keys
 	keyValidatorRegistrationTimestamp string
@@ -125,18 +144,35 @@ func NewRedisCache(prefix, redisURI, readonlyURI string) (*RedisCache, error) {
 		client:         client,
 		readonlyClient: roClient,
 
-		prefixGetHeaderResponse:     fmt.Sprintf("%s/%s:cache-gethead-response", redisPrefix, prefix),
+		prefixGetHeaderResponse:    fmt.Sprintf("%s/%s:cache-gethead-response", redisPrefix, prefix),
+		prefixGetTobHeaderResponse: fmt.Sprintf("%s/%s:cache-gettobhead-response", redisPrefix, prefix),
+		prefixGetRobHeaderResponse: fmt.Sprintf("%s/%s:cache-getrobhead-response", redisPrefix, prefix),
+
 		prefixExecPayloadCapella:    fmt.Sprintf("%s/%s:cache-execpayload-capella", redisPrefix, prefix),
 		prefixTobExecPayloadCapella: fmt.Sprintf("%s/%s:cache-exectobpayload-capella", redisPrefix, prefix),
 		prefixRobExecPayloadCapella: fmt.Sprintf("%s/%s:cache-execrobpayload-capella", redisPrefix, prefix),
 		prefixBidTrace:              fmt.Sprintf("%s/%s:cache-bid-trace", redisPrefix, prefix),
+		prefixTobBidTrace:           fmt.Sprintf("%s/%s:cache-tobbid-trace", redisPrefix, prefix),
+		prefixRobBidTrace:           fmt.Sprintf("%s/%s:cache-robbid-trace", redisPrefix, prefix),
 
-		prefixBlockBuilderLatestBids:      fmt.Sprintf("%s/%s:block-builder-latest-bid", redisPrefix, prefix),       // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
-		prefixBlockBuilderLatestBidsValue: fmt.Sprintf("%s/%s:block-builder-latest-bid-value", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
-		prefixBlockBuilderLatestBidsTime:  fmt.Sprintf("%s/%s:block-builder-latest-bid-time", redisPrefix, prefix),  // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
-		prefixTopBidValue:                 fmt.Sprintf("%s/%s:top-bid-value", redisPrefix, prefix),                  // prefix:slot_parentHash_proposerPubkey
-		prefixFloorBid:                    fmt.Sprintf("%s/%s:bid-floor", redisPrefix, prefix),                      // prefix:slot_parentHash_proposerPubkey
-		prefixFloorBidValue:               fmt.Sprintf("%s/%s:bid-floor-value", redisPrefix, prefix),                // prefix:slot_parentHash_proposerPubkey
+		prefixBlockBuilderLatestBids:    fmt.Sprintf("%s/%s:block-builder-latest-bid", redisPrefix, prefix),    // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+		prefixBlockBuilderLatestTobBids: fmt.Sprintf("%s/%s:block-builder-latest-tobbid", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+		prefixBlockBuilderLatestRobBids: fmt.Sprintf("%s/%s:block-builder-latest-robbid", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+
+		prefixBlockBuilderLatestBidsValue:    fmt.Sprintf("%s/%s:block-builder-latest-bid-value", redisPrefix, prefix),    // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+		prefixBlockBuilderLatestTobBidsValue: fmt.Sprintf("%s/%s:block-builder-latest-tobbid-value", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+		prefixBlockBuilderLatestRobBidsValue: fmt.Sprintf("%s/%s:block-builder-latest-robbid-value", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+
+		prefixBlockBuilderLatestBidsTime:    fmt.Sprintf("%s/%s:block-builder-latest-bid-time", redisPrefix, prefix),    // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+		prefixBlockBuilderLatestTobBidsTime: fmt.Sprintf("%s/%s:block-builder-latest-tobbid-time", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+		prefixBlockBuilderLatestRobBidsTime: fmt.Sprintf("%s/%s:block-builder-latest-robbid-time", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+
+		prefixTopBidValue:    fmt.Sprintf("%s/%s:top-bid-value", redisPrefix, prefix),    // prefix:slot_parentHash_proposerPubkey
+		prefixTopTobBidValue: fmt.Sprintf("%s/%s:top-tobbid-value", redisPrefix, prefix), // prefix:slot_parentHash_proposerPubkey
+		prefixTopRobBidValue: fmt.Sprintf("%s/%s:top-robbid-value", redisPrefix, prefix), // prefix:slot_parentHash_proposerPubkey
+
+		prefixFloorBid:      fmt.Sprintf("%s/%s:bid-floor", redisPrefix, prefix),       // prefix:slot_parentHash_proposerPubkey
+		prefixFloorBidValue: fmt.Sprintf("%s/%s:bid-floor-value", redisPrefix, prefix), // prefix:slot_parentHash_proposerPubkey
 
 		keyValidatorRegistrationTimestamp: fmt.Sprintf("%s/%s:validator-registration-timestamp", redisPrefix, prefix),
 		keyRelayConfig:                    fmt.Sprintf("%s/%s:relay-config", redisPrefix, prefix),
@@ -151,6 +187,14 @@ func NewRedisCache(prefix, redisURI, readonlyURI string) (*RedisCache, error) {
 
 func (r *RedisCache) keyCacheGetHeaderResponse(slot uint64, parentHash, proposerPubkey string) string {
 	return fmt.Sprintf("%s:%d_%s_%s", r.prefixGetHeaderResponse, slot, parentHash, proposerPubkey)
+}
+
+func (r *RedisCache) keyCacheGetTobHeaderResponse(slot uint64, parentHash, proposerPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixGetTobHeaderResponse, slot, parentHash, proposerPubkey)
+}
+
+func (r *RedisCache) keyCacheGetRobHeaderResponse(slot uint64, parentHash, proposerPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixGetRobHeaderResponse, slot, parentHash, proposerPubkey)
 }
 
 func (r *RedisCache) keyExecPayloadCapella(slot uint64, proposerPubkey, blockHash string) string {
@@ -169,9 +213,27 @@ func (r *RedisCache) keyCacheBidTrace(slot uint64, proposerPubkey, blockHash str
 	return fmt.Sprintf("%s:%d_%s_%s", r.prefixBidTrace, slot, proposerPubkey, blockHash)
 }
 
+func (r *RedisCache) keyCacheTobBidTrace(slot uint64, proposerPubkey, blockHash string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixTobBidTrace, slot, proposerPubkey, blockHash)
+}
+
+func (r *RedisCache) keyCacheRobBidTrace(slot uint64, proposerPubkey, blockHash string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixRobBidTrace, slot, proposerPubkey, blockHash)
+}
+
 // keyLatestBidByBuilder returns the key for the getHeader response the latest bid by a specific builder
 func (r *RedisCache) keyLatestBidByBuilder(slot uint64, parentHash, proposerPubkey, builderPubkey string) string {
 	return fmt.Sprintf("%s:%d_%s_%s/%s", r.prefixBlockBuilderLatestBids, slot, parentHash, proposerPubkey, builderPubkey)
+}
+
+// keyLatestBidByBuilder returns the key for the getHeader response the latest bid by a specific builder
+func (r *RedisCache) keyLatestTobBidByBuilder(slot uint64, parentHash, proposerPubkey, builderPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s/%s", r.prefixBlockBuilderLatestTobBids, slot, parentHash, proposerPubkey, builderPubkey)
+}
+
+// keyLatestBidByBuilder returns the key for the getHeader response the latest bid by a specific builder
+func (r *RedisCache) keyLatestRobBidByBuilder(slot uint64, parentHash, proposerPubkey, builderPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s/%s", r.prefixBlockBuilderLatestRobBids, slot, parentHash, proposerPubkey, builderPubkey)
 }
 
 // keyBlockBuilderLatestBidValue returns the hashmap key for the value of the latest bid by a specific builder
@@ -179,14 +241,44 @@ func (r *RedisCache) keyBlockBuilderLatestBidsValue(slot uint64, parentHash, pro
 	return fmt.Sprintf("%s:%d_%s_%s", r.prefixBlockBuilderLatestBidsValue, slot, parentHash, proposerPubkey)
 }
 
+// keyBlockBuilderLatestBidValue returns the hashmap key for the value of the latest bid by a specific builder
+func (r *RedisCache) keyBlockBuilderLatestTobBidsValue(slot uint64, parentHash, proposerPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixBlockBuilderLatestTobBidsValue, slot, parentHash, proposerPubkey)
+}
+
+// keyBlockBuilderLatestBidValue returns the hashmap key for the value of the latest bid by a specific builder
+func (r *RedisCache) keyBlockBuilderLatestRobBidsValue(slot uint64, parentHash, proposerPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixBlockBuilderLatestRobBidsValue, slot, parentHash, proposerPubkey)
+}
+
 // keyBlockBuilderLatestBidValue returns the hashmap key for the time of the latest bid by a specific builder
 func (r *RedisCache) keyBlockBuilderLatestBidsTime(slot uint64, parentHash, proposerPubkey string) string {
 	return fmt.Sprintf("%s:%d_%s_%s", r.prefixBlockBuilderLatestBidsTime, slot, parentHash, proposerPubkey)
 }
 
+// keyBlockBuilderLatestBidValue returns the hashmap key for the time of the latest bid by a specific builder
+func (r *RedisCache) keyBlockBuilderLatestTobBidsTime(slot uint64, parentHash, proposerPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixBlockBuilderLatestTobBidsTime, slot, parentHash, proposerPubkey)
+}
+
+// keyBlockBuilderLatestBidValue returns the hashmap key for the time of the latest bid by a specific builder
+func (r *RedisCache) keyBlockBuilderLatestRobBidsTime(slot uint64, parentHash, proposerPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixBlockBuilderLatestRobBidsTime, slot, parentHash, proposerPubkey)
+}
+
 // keyTopBidValue returns the hashmap key for the time of the latest bid by a specific builder
 func (r *RedisCache) keyTopBidValue(slot uint64, parentHash, proposerPubkey string) string {
 	return fmt.Sprintf("%s:%d_%s_%s", r.prefixTopBidValue, slot, parentHash, proposerPubkey)
+}
+
+// keyTopBidValue returns the hashmap key for the time of the latest bid by a specific builder
+func (r *RedisCache) keyTopTobBidValue(slot uint64, parentHash, proposerPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixTopTobBidValue, slot, parentHash, proposerPubkey)
+}
+
+// keyTopBidValue returns the hashmap key for the time of the latest bid by a specific builder
+func (r *RedisCache) keyTopRobBidValue(slot uint64, parentHash, proposerPubkey string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixTopRobBidValue, slot, parentHash, proposerPubkey)
 }
 
 // keyFloorBid returns the key for the highest non-cancellable bid of a given slot+parentHash+proposerPubkey
@@ -465,6 +557,16 @@ func (r *RedisCache) SaveBidTrace(ctx context.Context, tx redis.Pipeliner, trace
 	return r.SetObjPipelined(ctx, tx, key, trace, expiryBidCache)
 }
 
+func (r *RedisCache) SaveTobBidTrace(ctx context.Context, tx redis.Pipeliner, trace *common.BidTraceV2) (err error) {
+	key := r.keyCacheTobBidTrace(trace.Slot, trace.ProposerPubkey.String(), trace.BlockHash.String())
+	return r.SetObjPipelined(ctx, tx, key, trace, expiryBidCache)
+}
+
+func (r *RedisCache) SaveRobBidTrace(ctx context.Context, tx redis.Pipeliner, trace *common.BidTraceV2) (err error) {
+	key := r.keyCacheRobBidTrace(trace.Slot, trace.ProposerPubkey.String(), trace.BlockHash.String())
+	return r.SetObjPipelined(ctx, tx, key, trace, expiryBidCache)
+}
+
 // GetBidTrace returns (trace, nil), or (nil, redis.Nil) if the trace does not exist
 func (r *RedisCache) GetBidTrace(slot uint64, proposerPubkey, blockHash string) (*common.BidTraceV2, error) {
 	key := r.keyCacheBidTrace(slot, proposerPubkey, blockHash)
@@ -473,8 +575,48 @@ func (r *RedisCache) GetBidTrace(slot uint64, proposerPubkey, blockHash string) 
 	return resp, err
 }
 
+// GetBidTrace returns (trace, nil), or (nil, redis.Nil) if the trace does not exist
+func (r *RedisCache) GetTobBidTrace(slot uint64, proposerPubkey, blockHash string) (*common.BidTraceV2, error) {
+	key := r.keyCacheTobBidTrace(slot, proposerPubkey, blockHash)
+	resp := new(common.BidTraceV2)
+	err := r.GetObj(key, resp)
+	return resp, err
+}
+
+// GetBidTrace returns (trace, nil), or (nil, redis.Nil) if the trace does not exist
+func (r *RedisCache) GetRobBidTrace(slot uint64, proposerPubkey, blockHash string) (*common.BidTraceV2, error) {
+	key := r.keyCacheRobBidTrace(slot, proposerPubkey, blockHash)
+	resp := new(common.BidTraceV2)
+	err := r.GetObj(key, resp)
+	return resp, err
+}
+
 func (r *RedisCache) GetBuilderLatestPayloadReceivedAt(ctx context.Context, tx redis.Pipeliner, slot uint64, builderPubkey, parentHash, proposerPubkey string) (int64, error) {
 	keyLatestBidsTime := r.keyBlockBuilderLatestBidsTime(slot, parentHash, proposerPubkey)
+	c := tx.HGet(context.Background(), keyLatestBidsTime, builderPubkey)
+	_, err := tx.Exec(ctx)
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+	return c.Int64()
+}
+
+func (r *RedisCache) GetBuilderLatestTobPayloadReceivedAt(ctx context.Context, tx redis.Pipeliner, slot uint64, builderPubkey, parentHash, proposerPubkey string) (int64, error) {
+	keyLatestBidsTime := r.keyBlockBuilderLatestTobBidsTime(slot, parentHash, proposerPubkey)
+	c := tx.HGet(context.Background(), keyLatestBidsTime, builderPubkey)
+	_, err := tx.Exec(ctx)
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+	return c.Int64()
+}
+
+func (r *RedisCache) GetBuilderLatestRobPayloadReceivedAt(ctx context.Context, tx redis.Pipeliner, slot uint64, builderPubkey, parentHash, proposerPubkey string) (int64, error) {
+	keyLatestBidsTime := r.keyBlockBuilderLatestRobBidsTime(slot, parentHash, proposerPubkey)
 	c := tx.HGet(context.Background(), keyLatestBidsTime, builderPubkey)
 	_, err := tx.Exec(ctx)
 	if errors.Is(err, redis.Nil) {
@@ -507,6 +649,64 @@ func (r *RedisCache) SaveBuilderBid(ctx context.Context, tx redis.Pipeliner, slo
 
 	// set the value last, because that's iterated over when updating the best bid, and the payload has to be available
 	keyLatestBidsValue := r.keyBlockBuilderLatestBidsValue(slot, parentHash, proposerPubkey)
+	err = tx.HSet(ctx, keyLatestBidsValue, builderPubkey, headerResp.Value().String()).Err()
+	if err != nil {
+		return err
+	}
+	return tx.Expire(ctx, keyLatestBidsValue, expiryBidCache).Err()
+}
+
+// SaveBuilderBid saves the latest bid by a specific builder. TODO: use transaction to make these writes atomic
+func (r *RedisCache) SaveBuilderTobBid(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash, proposerPubkey, builderPubkey string, receivedAt time.Time, headerResp *common.GetHeaderResponse) (err error) {
+	// save the actual bid
+	keyLatestBid := r.keyLatestTobBidByBuilder(slot, parentHash, proposerPubkey, builderPubkey)
+	err = r.SetObjPipelined(ctx, tx, keyLatestBid, headerResp, expiryBidCache)
+	if err != nil {
+		return err
+	}
+
+	// set the time of the request
+	keyLatestBidsTime := r.keyBlockBuilderLatestTobBidsTime(slot, parentHash, proposerPubkey)
+	err = tx.HSet(ctx, keyLatestBidsTime, builderPubkey, receivedAt.UnixMilli()).Err()
+	if err != nil {
+		return err
+	}
+	err = tx.Expire(ctx, keyLatestBidsTime, expiryBidCache).Err()
+	if err != nil {
+		return err
+	}
+
+	// set the value last, because that's iterated over when updating the best bid, and the payload has to be available
+	keyLatestBidsValue := r.keyBlockBuilderLatestTobBidsValue(slot, parentHash, proposerPubkey)
+	err = tx.HSet(ctx, keyLatestBidsValue, builderPubkey, headerResp.Value().String()).Err()
+	if err != nil {
+		return err
+	}
+	return tx.Expire(ctx, keyLatestBidsValue, expiryBidCache).Err()
+}
+
+// SaveBuilderBid saves the latest bid by a specific builder. TODO: use transaction to make these writes atomic
+func (r *RedisCache) SaveBuilderRobBid(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash, proposerPubkey, builderPubkey string, receivedAt time.Time, headerResp *common.GetHeaderResponse) (err error) {
+	// save the actual bid
+	keyLatestBid := r.keyLatestRobBidByBuilder(slot, parentHash, proposerPubkey, builderPubkey)
+	err = r.SetObjPipelined(ctx, tx, keyLatestBid, headerResp, expiryBidCache)
+	if err != nil {
+		return err
+	}
+
+	// set the time of the request
+	keyLatestBidsTime := r.keyBlockBuilderLatestRobBidsTime(slot, parentHash, proposerPubkey)
+	err = tx.HSet(ctx, keyLatestBidsTime, builderPubkey, receivedAt.UnixMilli()).Err()
+	if err != nil {
+		return err
+	}
+	err = tx.Expire(ctx, keyLatestBidsTime, expiryBidCache).Err()
+	if err != nil {
+		return err
+	}
+
+	// set the value last, because that's iterated over when updating the best bid, and the payload has to be available
+	keyLatestBidsValue := r.keyBlockBuilderLatestRobBidsValue(slot, parentHash, proposerPubkey)
 	err = tx.HSet(ctx, keyLatestBidsValue, builderPubkey, headerResp.Value().String()).Err()
 	if err != nil {
 		return err
@@ -661,6 +861,270 @@ func (r *RedisCache) SaveBidAndUpdateTopBid(ctx context.Context, tx redis.Pipeli
 	return state, err
 }
 
+func (r *RedisCache) SaveBidAndUpdateTopTobBid(ctx context.Context, tx redis.Pipeliner, trace *common.BidTraceV2, payload *common.BuilderSubmitBlockRequest, getPayloadResponse *common.GetPayloadResponse, getHeaderResponse *common.GetHeaderResponse, reqReceivedAt time.Time, isCancellationEnabled bool) (state SaveBidAndUpdateTopBidResponse, err error) {
+	var prevTime, nextTime time.Time
+	prevTime = time.Now()
+
+	// Load latest bids for a given slot+parent+proposer
+	builderBids, err := NewBuilderTobBidsFromRedis(ctx, r, tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
+	if err != nil {
+		return state, err
+	}
+
+	payloadValue := payload.Value()
+
+	// Get the reference top bid value
+	_, state.TopBidValue = builderBids.getTopBid()
+	if payloadValue.Cmp(state.TopBidValue) == 1 {
+		state.TopBidValue = payloadValue
+	} else {
+		return state, nil
+	}
+	state.PrevTopBidValue = state.TopBidValue
+
+	// Record time needed
+	nextTime = time.Now().UTC()
+	state.TimePrep = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	//
+	// Time to save things in Redis
+	//
+	// 1. Save the execution payload
+	err = r.SaveTobExecutionPayloadCapella(ctx, tx, payload.Slot(), payload.ProposerPubkey(), payload.BlockHash(), getPayloadResponse.Capella.Capella)
+	if err != nil {
+		return state, err
+	}
+
+	// Record time needed to save payload
+	nextTime = time.Now().UTC()
+	state.TimeSavePayload = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	// 2. Save latest bid for this builder
+	err = r.SaveBuilderTobBid(ctx, tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey(), payload.BuilderPubkey().String(), reqReceivedAt, getHeaderResponse)
+	if err != nil {
+		return state, err
+	}
+	state.WasBidSaved = true
+	builderBids.bidValues[payload.BuilderPubkey().String()] = payload.Value()
+
+	// Record time needed to save bid
+	nextTime = time.Now().UTC()
+	state.TimeSaveBid = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	// 3. Save the bid trace
+	err = r.SaveTobBidTrace(ctx, tx, trace)
+	if err != nil {
+		return state, err
+	}
+
+	// Record time needed to save trace
+	nextTime = time.Now().UTC()
+	state.TimeSaveTrace = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	// If top bid value hasn't change, abort now
+	_, state.TopBidValue = builderBids.getTopBid()
+	if state.TopBidValue.Cmp(state.PrevTopBidValue) == 0 {
+		return state, nil
+	}
+
+	state, err = r._updateTopTobBid(ctx, tx, state, builderBids, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
+	if err != nil {
+		return state, err
+	}
+	state.IsNewTopBid = payload.Value().Cmp(state.TopBidValue) == 0
+
+	// Record time needed to update top bid
+	nextTime = time.Now().UTC()
+	state.TimeUpdateTopBid = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	return state, err
+}
+
+func (r *RedisCache) SaveBidAndUpdateTopRobBid(ctx context.Context, tx redis.Pipeliner, trace *common.BidTraceV2, payload *common.BuilderSubmitBlockRequest, getPayloadResponse *common.GetPayloadResponse, getHeaderResponse *common.GetHeaderResponse, reqReceivedAt time.Time, isCancellationEnabled bool) (state SaveBidAndUpdateTopBidResponse, err error) {
+	var prevTime, nextTime time.Time
+	prevTime = time.Now()
+
+	// Load latest bids for a given slot+parent+proposer
+	builderBids, err := NewBuilderRobBidsFromRedis(ctx, r, tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
+	if err != nil {
+		return state, err
+	}
+
+	payloadValue := payload.Value()
+
+	// Get the reference top bid value
+	_, state.TopBidValue = builderBids.getTopBid()
+	if payloadValue.Cmp(state.TopBidValue) == 1 {
+		state.TopBidValue = payloadValue
+	} else {
+		// if it is not higher than previous top bid, we can ignore
+		return state, nil
+	}
+
+	state.PrevTopBidValue = state.TopBidValue
+
+	// Record time needed
+	nextTime = time.Now().UTC()
+	state.TimePrep = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	//
+	// Time to save things in Redis
+	//
+	// 1. Save the execution payload
+	err = r.SaveRobExecutionPayloadCapella(ctx, tx, payload.Slot(), payload.ProposerPubkey(), payload.BlockHash(), getPayloadResponse.Capella.Capella)
+	if err != nil {
+		return state, err
+	}
+
+	// Record time needed to save payload
+	nextTime = time.Now().UTC()
+	state.TimeSavePayload = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	// 2. Save latest bid for this builder
+	err = r.SaveBuilderRobBid(ctx, tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey(), payload.BuilderPubkey().String(), reqReceivedAt, getHeaderResponse)
+	if err != nil {
+		return state, err
+	}
+	state.WasBidSaved = true
+	builderBids.bidValues[payload.BuilderPubkey().String()] = payload.Value()
+
+	// Record time needed to save bid
+	nextTime = time.Now().UTC()
+	state.TimeSaveBid = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	// 3. Save the bid trace
+	err = r.SaveRobBidTrace(ctx, tx, trace)
+	if err != nil {
+		return state, err
+	}
+
+	// Record time needed to save trace
+	nextTime = time.Now().UTC()
+	state.TimeSaveTrace = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	// If top bid value hasn't change, abort now
+	_, state.TopBidValue = builderBids.getTopBid()
+	if state.TopBidValue.Cmp(state.PrevTopBidValue) == 0 {
+		return state, nil
+	}
+
+	state, err = r._updateTopRobBid(ctx, tx, state, builderBids, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
+	if err != nil {
+		return state, err
+	}
+	state.IsNewTopBid = payload.Value().Cmp(state.TopBidValue) == 0
+
+	// Record time needed to update top bid
+	nextTime = time.Now().UTC()
+	state.TimeUpdateTopBid = nextTime.Sub(prevTime)
+	prevTime = nextTime
+
+	return state, err
+}
+
+func (r *RedisCache) _updateTopTobBid(ctx context.Context, tx redis.Pipeliner, state SaveBidAndUpdateTopBidResponse, builderBids *BuilderBids, slot uint64, parentHash, proposerPubkey string) (resp SaveBidAndUpdateTopBidResponse, err error) {
+	if builderBids == nil {
+		builderBids, err = NewBuilderTobBidsFromRedis(ctx, r, tx, slot, parentHash, proposerPubkey)
+		if err != nil {
+			return state, err
+		}
+	}
+
+	if len(builderBids.bidValues) == 0 {
+		return state, nil
+	}
+
+	topBidBuilder := ""
+	topBidBuilder, state.TopBidValue = builderBids.getTopBid()
+	keyBidSource := r.keyLatestTobBidByBuilder(slot, parentHash, proposerPubkey, topBidBuilder)
+
+	// Copy winning bid to top bid cache
+	keyTopBid := r.keyCacheGetTobHeaderResponse(slot, parentHash, proposerPubkey)
+	c := tx.Copy(context.Background(), keyBidSource, keyTopBid, 0, true)
+	_, err = tx.Exec(ctx)
+	if err != nil {
+		return state, err
+	}
+	wasCopied, err := c.Result()
+	if err != nil {
+		return state, err
+	} else if wasCopied == 0 {
+		return state, fmt.Errorf("could not copy top tob bid from %s to %s", keyBidSource, keyTopBid) //nolint:goerr113
+	}
+	err = tx.Expire(context.Background(), keyTopBid, expiryBidCache).Err()
+	if err != nil {
+		return state, err
+	}
+
+	state.WasTopBidUpdated = state.PrevTopBidValue == nil || state.PrevTopBidValue.Cmp(state.TopBidValue) != 0
+
+	// 6. Finally, update the global top bid value
+	keyTopBidValue := r.keyTopTobBidValue(slot, parentHash, proposerPubkey)
+	err = tx.Set(context.Background(), keyTopBidValue, state.TopBidValue.String(), expiryBidCache).Err()
+	if err != nil {
+		return state, err
+	}
+
+	_, err = tx.Exec(ctx)
+	return state, err
+}
+
+func (r *RedisCache) _updateTopRobBid(ctx context.Context, tx redis.Pipeliner, state SaveBidAndUpdateTopBidResponse, builderBids *BuilderBids, slot uint64, parentHash, proposerPubkey string) (resp SaveBidAndUpdateTopBidResponse, err error) {
+	if builderBids == nil {
+		builderBids, err = NewBuilderRobBidsFromRedis(ctx, r, tx, slot, parentHash, proposerPubkey)
+		if err != nil {
+			return state, err
+		}
+	}
+
+	if len(builderBids.bidValues) == 0 {
+		return state, nil
+	}
+
+	topBidBuilder := ""
+	topBidBuilder, state.TopBidValue = builderBids.getTopBid()
+	keyBidSource := r.keyLatestRobBidByBuilder(slot, parentHash, proposerPubkey, topBidBuilder)
+
+	// Copy winning bid to top bid cache
+	keyTopBid := r.keyCacheGetRobHeaderResponse(slot, parentHash, proposerPubkey)
+	c := tx.Copy(context.Background(), keyBidSource, keyTopBid, 0, true)
+	_, err = tx.Exec(ctx)
+	if err != nil {
+		return state, err
+	}
+	wasCopied, err := c.Result()
+	if err != nil {
+		return state, err
+	} else if wasCopied == 0 {
+		return state, fmt.Errorf("could not copy top rob bid from %s to %s", keyBidSource, keyTopBid) //nolint:goerr113
+	}
+	err = tx.Expire(context.Background(), keyTopBid, expiryBidCache).Err()
+	if err != nil {
+		return state, err
+	}
+
+	state.WasTopBidUpdated = state.PrevTopBidValue == nil || state.PrevTopBidValue.Cmp(state.TopBidValue) != 0
+
+	// 6. Finally, update the global top bid value
+	keyTopBidValue := r.keyTopRobBidValue(slot, parentHash, proposerPubkey)
+	err = tx.Set(context.Background(), keyTopBidValue, state.TopBidValue.String(), expiryBidCache).Err()
+	if err != nil {
+		return state, err
+	}
+
+	_, err = tx.Exec(ctx)
+	return state, err
+}
+
 func (r *RedisCache) _updateTopBid(ctx context.Context, tx redis.Pipeliner, state SaveBidAndUpdateTopBidResponse, builderBids *BuilderBids, slot uint64, parentHash, proposerPubkey string, floorValue *big.Int) (resp SaveBidAndUpdateTopBidResponse, err error) {
 	if builderBids == nil {
 		builderBids, err = NewBuilderBidsFromRedis(ctx, r, tx, slot, parentHash, proposerPubkey)
@@ -742,9 +1206,77 @@ func (r *RedisCache) GetTopBidValue(ctx context.Context, tx redis.Pipeliner, slo
 	return topBidValue, nil
 }
 
+// GetTopBidValue gets the top bid value for a given slot+parent+proposer combination
+func (r *RedisCache) GetTopTobBidValue(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash, proposerPubkey string) (topBidValue *big.Int, err error) {
+	keyTopBidValue := r.keyTopTobBidValue(slot, parentHash, proposerPubkey)
+	c := tx.Get(ctx, keyTopBidValue)
+	_, err = tx.Exec(ctx)
+	if errors.Is(err, redis.Nil) {
+		return big.NewInt(0), nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	topBidValueStr, err := c.Result()
+	if err != nil {
+		return nil, err
+	}
+	topBidValue = new(big.Int)
+	topBidValue.SetString(topBidValueStr, 10)
+	return topBidValue, nil
+}
+
+// GetTopBidValue gets the top bid value for a given slot+parent+proposer combination
+func (r *RedisCache) GetTopRobBidValue(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash, proposerPubkey string) (topBidValue *big.Int, err error) {
+	keyTopBidValue := r.keyTopRobBidValue(slot, parentHash, proposerPubkey)
+	c := tx.Get(ctx, keyTopBidValue)
+	_, err = tx.Exec(ctx)
+	if errors.Is(err, redis.Nil) {
+		return big.NewInt(0), nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	topBidValueStr, err := c.Result()
+	if err != nil {
+		return nil, err
+	}
+	topBidValue = new(big.Int)
+	topBidValue.SetString(topBidValueStr, 10)
+	return topBidValue, nil
+}
+
 // GetBuilderLatestValue gets the latest bid value for a given slot+parent+proposer combination for a specific builder pubkey.
 func (r *RedisCache) GetBuilderLatestValue(slot uint64, parentHash, proposerPubkey, builderPubkey string) (topBidValue *big.Int, err error) {
 	keyLatestValue := r.keyBlockBuilderLatestBidsValue(slot, parentHash, proposerPubkey)
+	topBidValueStr, err := r.client.HGet(context.Background(), keyLatestValue, builderPubkey).Result()
+	if errors.Is(err, redis.Nil) {
+		return big.NewInt(0), nil
+	} else if err != nil {
+		return nil, err
+	}
+	topBidValue = new(big.Int)
+	topBidValue.SetString(topBidValueStr, 10)
+	return topBidValue, nil
+}
+
+// GetBuilderLatestValue gets the latest bid value for a given slot+parent+proposer combination for a specific builder pubkey.
+func (r *RedisCache) GetBuilderLatestTobValue(slot uint64, parentHash, proposerPubkey, builderPubkey string) (topBidValue *big.Int, err error) {
+	keyLatestValue := r.keyBlockBuilderLatestTobBidsValue(slot, parentHash, proposerPubkey)
+	topBidValueStr, err := r.client.HGet(context.Background(), keyLatestValue, builderPubkey).Result()
+	if errors.Is(err, redis.Nil) {
+		return big.NewInt(0), nil
+	} else if err != nil {
+		return nil, err
+	}
+	topBidValue = new(big.Int)
+	topBidValue.SetString(topBidValueStr, 10)
+	return topBidValue, nil
+}
+
+// GetBuilderLatestValue gets the latest bid value for a given slot+parent+proposer combination for a specific builder pubkey.
+func (r *RedisCache) GetBuilderLatestRobValue(slot uint64, parentHash, proposerPubkey, builderPubkey string) (topBidValue *big.Int, err error) {
+	keyLatestValue := r.keyBlockBuilderLatestRobBidsValue(slot, parentHash, proposerPubkey)
 	topBidValueStr, err := r.client.HGet(context.Background(), keyLatestValue, builderPubkey).Result()
 	if errors.Is(err, redis.Nil) {
 		return big.NewInt(0), nil
@@ -767,6 +1299,50 @@ func (r *RedisCache) DelBuilderBid(ctx context.Context, tx redis.Pipeliner, slot
 
 	// delete the time
 	keyLatestBidsTime := r.keyBlockBuilderLatestBidsTime(slot, parentHash, proposerPubkey)
+	err = r.client.HDel(ctx, keyLatestBidsTime, builderPubkey).Err()
+	if err != nil {
+		return err
+	}
+
+	// update bids now to compute current top bid
+	state := SaveBidAndUpdateTopBidResponse{} //nolint:exhaustruct
+	_, err = r._updateTopBid(ctx, tx, state, nil, slot, parentHash, proposerPubkey, nil)
+	return err
+}
+
+// DelBuilderBid removes a builders most recent bid
+func (r *RedisCache) DelBuilderTobBid(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash, proposerPubkey, builderPubkey string) (err error) {
+	// delete the value
+	keyLatestValue := r.keyBlockBuilderLatestTobBidsValue(slot, parentHash, proposerPubkey)
+	err = r.client.HDel(ctx, keyLatestValue, builderPubkey).Err()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
+
+	// delete the time
+	keyLatestBidsTime := r.keyBlockBuilderLatestTobBidsTime(slot, parentHash, proposerPubkey)
+	err = r.client.HDel(ctx, keyLatestBidsTime, builderPubkey).Err()
+	if err != nil {
+		return err
+	}
+
+	// update bids now to compute current top bid
+	state := SaveBidAndUpdateTopBidResponse{} //nolint:exhaustruct
+	_, err = r._updateTopBid(ctx, tx, state, nil, slot, parentHash, proposerPubkey, nil)
+	return err
+}
+
+// DelBuilderBid removes a builders most recent bid
+func (r *RedisCache) DelBuilderRobBid(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash, proposerPubkey, builderPubkey string) (err error) {
+	// delete the value
+	keyLatestValue := r.keyBlockBuilderLatestRobBidsValue(slot, parentHash, proposerPubkey)
+	err = r.client.HDel(ctx, keyLatestValue, builderPubkey).Err()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
+
+	// delete the time
+	keyLatestBidsTime := r.keyBlockBuilderLatestRobBidsTime(slot, parentHash, proposerPubkey)
 	err = r.client.HDel(ctx, keyLatestBidsTime, builderPubkey).Err()
 	if err != nil {
 		return err
