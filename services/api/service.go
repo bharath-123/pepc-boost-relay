@@ -67,6 +67,8 @@ var (
 	// Block builder API
 	pathBuilderGetValidators = "/relay/v1/builder/validators"
 	pathSubmitNewBlock       = "/relay/v1/builder/blocks"
+	pathSubmitNewTobBlock    = "/relay/v1/builder/tob_blocks"
+	pathSubmitNewRobBlock    = "/relay/v1/builder/rob_blocks"
 
 	// Data API
 	pathDataProposerPayloadDelivered = "/relay/v1/data/bidtraces/proposer_payload_delivered"
@@ -344,6 +346,8 @@ func (api *RelayAPI) getRouter() http.Handler {
 		api.log.Info("block builder API enabled")
 		r.HandleFunc(pathBuilderGetValidators, api.handleBuilderGetValidators).Methods(http.MethodGet)
 		r.HandleFunc(pathSubmitNewBlock, api.handleSubmitNewBlock).Methods(http.MethodPost)
+		r.HandleFunc(pathSubmitNewTobBlock, api.handleSubmitNewTobBlock).Methods(http.MethodPost)
+		r.HandleFunc(pathSubmitNewRobBlock, api.handleSubmitNewRobBlock).Methods(http.MethodPost)
 	}
 
 	// Data API
@@ -900,7 +904,6 @@ func (api *RelayAPI) handleRegisterValidator(w http.ResponseWriter, req *http.Re
 	req.Body.Close()
 
 	parseRegistration := func(value []byte) (reg *boostTypes.SignedValidatorRegistration, err error) {
-		log.Infof("DEBUGGG: processing registration message: %s", string(value))
 		// Pubkey
 		_pubkey, err := jsonparser.GetUnsafeString(value, "message", "pubkey")
 		if err != nil {
@@ -1610,6 +1613,14 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 	return builderEntry, true
 }
 
+func (api *RelayAPI) handleSubmitNewTobBlock(w http.ResponseWriter, req *http.Request) {
+
+}
+
+func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Request) {
+
+}
+
 func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Request) {
 	var pf common.Profile
 	var prevTime, nextTime time.Time
@@ -1779,6 +1790,8 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	// Create the redis pipeline tx
 	tx := api.redis.NewTxPipeline()
 
+	// bchain - Here we will have to the last TOB slot which a TOB was delivered. We will have to namespace the entire
+	// db and redis caches into TOB and ROB
 	// Reject new submissions once the payload for this slot was delivered - TODO: store in memory as well
 	slotLastPayloadDelivered, err := api.redis.GetLastSlotDelivered(context.Background(), tx)
 	if err != nil && !errors.Is(err, redis.Nil) {
