@@ -86,6 +86,8 @@ type RedisCache struct {
 	// prefixes (keys generated with a function)
 	prefixGetHeaderResponse           string
 	prefixExecPayloadCapella          string
+	prefixTobExecPayloadCapella       string
+	prefixRobExecPayloadCapella       string
 	prefixBidTrace                    string
 	prefixBlockBuilderLatestBids      string // latest bid for a given slot
 	prefixBlockBuilderLatestBidsValue string // value of latest bid for a given slot
@@ -123,9 +125,11 @@ func NewRedisCache(prefix, redisURI, readonlyURI string) (*RedisCache, error) {
 		client:         client,
 		readonlyClient: roClient,
 
-		prefixGetHeaderResponse:  fmt.Sprintf("%s/%s:cache-gethead-response", redisPrefix, prefix),
-		prefixExecPayloadCapella: fmt.Sprintf("%s/%s:cache-execpayload-capella", redisPrefix, prefix),
-		prefixBidTrace:           fmt.Sprintf("%s/%s:cache-bid-trace", redisPrefix, prefix),
+		prefixGetHeaderResponse:     fmt.Sprintf("%s/%s:cache-gethead-response", redisPrefix, prefix),
+		prefixExecPayloadCapella:    fmt.Sprintf("%s/%s:cache-execpayload-capella", redisPrefix, prefix),
+		prefixTobExecPayloadCapella: fmt.Sprintf("%s/%s:cache-exectobpayload-capella", redisPrefix, prefix),
+		prefixRobExecPayloadCapella: fmt.Sprintf("%s/%s:cache-execrobpayload-capella", redisPrefix, prefix),
+		prefixBidTrace:              fmt.Sprintf("%s/%s:cache-bid-trace", redisPrefix, prefix),
 
 		prefixBlockBuilderLatestBids:      fmt.Sprintf("%s/%s:block-builder-latest-bid", redisPrefix, prefix),       // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
 		prefixBlockBuilderLatestBidsValue: fmt.Sprintf("%s/%s:block-builder-latest-bid-value", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
@@ -150,6 +154,14 @@ func (r *RedisCache) keyCacheGetHeaderResponse(slot uint64, parentHash, proposer
 }
 
 func (r *RedisCache) keyExecPayloadCapella(slot uint64, proposerPubkey, blockHash string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixExecPayloadCapella, slot, proposerPubkey, blockHash)
+}
+
+func (r *RedisCache) keyTobExecPayloadCapella(slot uint64, proposerPubkey, blockHash string) string {
+	return fmt.Sprintf("%s:%d_%s_%s", r.prefixExecPayloadCapella, slot, proposerPubkey, blockHash)
+}
+
+func (r *RedisCache) keyRobExecPayloadCapella(slot uint64, proposerPubkey, blockHash string) string {
 	return fmt.Sprintf("%s:%d_%s_%s", r.prefixExecPayloadCapella, slot, proposerPubkey, blockHash)
 }
 
@@ -367,11 +379,71 @@ func (r *RedisCache) SaveExecutionPayloadCapella(ctx context.Context, tx redis.P
 	return tx.Set(ctx, key, b, expiryBidCache).Err()
 }
 
+func (r *RedisCache) SaveTobExecutionPayloadCapella(ctx context.Context, tx redis.Pipeliner, slot uint64, proposerPubkey, blockHash string, execPayload *capella.ExecutionPayload) (err error) {
+	key := r.keyTobExecPayloadCapella(slot, proposerPubkey, blockHash)
+	b, err := execPayload.MarshalSSZ()
+	if err != nil {
+		return err
+	}
+	return tx.Set(ctx, key, b, expiryBidCache).Err()
+}
+
+func (r *RedisCache) SaveRobExecutionPayloadCapella(ctx context.Context, tx redis.Pipeliner, slot uint64, proposerPubkey, blockHash string, execPayload *capella.ExecutionPayload) (err error) {
+	key := r.keyRobExecPayloadCapella(slot, proposerPubkey, blockHash)
+	b, err := execPayload.MarshalSSZ()
+	if err != nil {
+		return err
+	}
+	return tx.Set(ctx, key, b, expiryBidCache).Err()
+}
+
 func (r *RedisCache) GetExecutionPayloadCapella(slot uint64, proposerPubkey, blockHash string) (*common.VersionedExecutionPayload, error) {
 	resp := new(common.VersionedExecutionPayload)
 	capellaPayload := new(capella.ExecutionPayload)
 
 	key := r.keyExecPayloadCapella(slot, proposerPubkey, blockHash)
+	val, err := r.client.Get(context.Background(), key).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	err = capellaPayload.UnmarshalSSZ([]byte(val))
+	if err != nil {
+		return nil, err
+	}
+
+	resp.Capella = new(api.VersionedExecutionPayload)
+	resp.Capella.Capella = capellaPayload
+	resp.Capella.Version = consensusspec.DataVersionCapella
+	return resp, nil
+}
+
+func (r *RedisCache) GetTobExecutionPayloadCapella(slot uint64, proposerPubkey, blockHash string) (*common.VersionedExecutionPayload, error) {
+	resp := new(common.VersionedExecutionPayload)
+	capellaPayload := new(capella.ExecutionPayload)
+
+	key := r.keyTobExecPayloadCapella(slot, proposerPubkey, blockHash)
+	val, err := r.client.Get(context.Background(), key).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	err = capellaPayload.UnmarshalSSZ([]byte(val))
+	if err != nil {
+		return nil, err
+	}
+
+	resp.Capella = new(api.VersionedExecutionPayload)
+	resp.Capella.Capella = capellaPayload
+	resp.Capella.Version = consensusspec.DataVersionCapella
+	return resp, nil
+}
+
+func (r *RedisCache) GetRobExecutionPayloadCapella(slot uint64, proposerPubkey, blockHash string) (*common.VersionedExecutionPayload, error) {
+	resp := new(common.VersionedExecutionPayload)
+	capellaPayload := new(capella.ExecutionPayload)
+
+	key := r.keyRobExecPayloadCapella(slot, proposerPubkey, blockHash)
 	val, err := r.client.Get(context.Background(), key).Result()
 	if err != nil {
 		return nil, err

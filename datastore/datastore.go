@@ -20,6 +20,8 @@ import (
 )
 
 var ErrExecutionPayloadNotFound = errors.New("execution payload not found")
+var ErrTobExecutionPayloadNotFound = errors.New("tob execution payload not found")
+var ErrRobExecutionPayloadNotFound = errors.New("rob execution payload not found")
 
 type GetHeaderResponseKey struct {
 	Slot           uint64
@@ -196,7 +198,7 @@ func (ds *Datastore) GetGetTobPayloadResponse(log *logrus.Entry, slot uint64, pr
 	_blockHash := strings.ToLower(blockHash)
 
 	// 1. try to get from Redis
-	resp, err := ds.redis.GetExecutionPayloadCapella(slot, _proposerPubkey, _blockHash)
+	resp, err := ds.redis.GetTobExecutionPayloadCapella(slot, _proposerPubkey, _blockHash)
 	if errors.Is(err, redis.Nil) {
 		log.WithError(err).Warn("execution payload not found in redis")
 	} else if err != nil {
@@ -208,29 +210,74 @@ func (ds *Datastore) GetGetTobPayloadResponse(log *logrus.Entry, slot uint64, pr
 
 	// 2. try to get from Memcached
 	if ds.memcached != nil {
-		resp, err = ds.memcached.GetExecutionPayload(slot, _proposerPubkey, _blockHash)
+		resp, err = ds.memcached.GetTobExecutionPayload(slot, _proposerPubkey, _blockHash)
 		if errors.Is(err, memcache.ErrCacheMiss) {
-			log.WithError(err).Warn("execution payload not found in memcached")
+			log.WithError(err).Warn("tob execution payload not found in memcached")
 		} else if err != nil {
-			log.WithError(err).Error("error getting execution payload from memcached")
+			log.WithError(err).Error("error getting tob execution payload from memcached")
 		} else if resp != nil {
-			log.Debug("getPayload response from memcached")
+			log.Debug("getTobPayload response from memcached")
 			return resp, nil
 		}
 	}
 
 	// 3. try to get from database (should not happen, it's just a backup)
-	executionPayloadEntry, err := ds.db.GetExecutionPayloadEntryBySlotPkHash(slot, proposerPubkey, blockHash)
+	executionPayloadEntry, err := ds.db.GetTobExecutionPayloadEntryBySlotPkHash(slot, proposerPubkey, blockHash)
 	if errors.Is(err, sql.ErrNoRows) {
-		log.WithError(err).Warn("execution payload not found in database")
-		return nil, ErrExecutionPayloadNotFound
+		log.WithError(err).Warn("tob execution payload not found in database")
+		return nil, ErrTobExecutionPayloadNotFound
 	} else if err != nil {
-		log.WithError(err).Error("error getting execution payload from database")
+		log.WithError(err).Error("error getting tob execution payload from database")
 		return nil, err
 	}
 
 	// Got it from database, now deserialize execution payload and compile full response
-	log.Warn("getPayload response from database, primary storage failed")
+	log.Warn("getTobPayload response from database, primary storage failed")
+	return database.ExecutionPayloadEntryToExecutionPayload(executionPayloadEntry)
+}
+
+// GetGetRobPayloadResponse returns the getTobPayload response from memory or Redis or Database
+func (ds *Datastore) GetGetRobPayloadResponse(log *logrus.Entry, slot uint64, proposerPubkey, blockHash string) (*common.VersionedExecutionPayload, error) {
+	log = log.WithField("datastoreMethod", "GetGetRobPayloadResponse")
+	_proposerPubkey := strings.ToLower(proposerPubkey)
+	_blockHash := strings.ToLower(blockHash)
+
+	// 1. try to get from Redis
+	resp, err := ds.redis.GetRobExecutionPayloadCapella(slot, _proposerPubkey, _blockHash)
+	if errors.Is(err, redis.Nil) {
+		log.WithError(err).Warn("execution payload not found in redis")
+	} else if err != nil {
+		log.WithError(err).Error("error getting execution payload from redis")
+	} else {
+		log.Debug("getPayload response from redis")
+		return resp, nil
+	}
+
+	// 2. try to get from Memcached
+	if ds.memcached != nil {
+		resp, err = ds.memcached.GetRobExecutionPayload(slot, _proposerPubkey, _blockHash)
+		if errors.Is(err, memcache.ErrCacheMiss) {
+			log.WithError(err).Warn("rob execution payload not found in memcached")
+		} else if err != nil {
+			log.WithError(err).Error("error getting rob execution payload from memcached")
+		} else if resp != nil {
+			log.Debug("getRobPayload response from memcached")
+			return resp, nil
+		}
+	}
+
+	// 3. try to get from database (should not happen, it's just a backup)
+	executionPayloadEntry, err := ds.db.GetRobExecutionPayloadEntryBySlotPkHash(slot, proposerPubkey, blockHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		log.WithError(err).Warn("rob execution payload not found in database")
+		return nil, ErrTobExecutionPayloadNotFound
+	} else if err != nil {
+		log.WithError(err).Error("error getting rob execution payload from database")
+		return nil, err
+	}
+
+	// Got it from database, now deserialize execution payload and compile full response
+	log.Warn("getRobPayload response from database, primary storage failed")
 	return database.ExecutionPayloadEntryToExecutionPayload(executionPayloadEntry)
 }
 
