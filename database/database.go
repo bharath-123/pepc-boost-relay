@@ -330,7 +330,7 @@ func (s *DatabaseService) SaveTobBuilderBlockSubmission(payload *common.BuilderS
 	}
 
 	if saveExecPayload {
-		err = s.nstmtInsertExecutionPayload.QueryRow(execPayloadEntry).Scan(&execPayloadEntry.ID)
+		err = s.nstmtInsertTobExecutionPayload.QueryRow(execPayloadEntry).Scan(&execPayloadEntry.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -395,7 +395,7 @@ func (s *DatabaseService) SaveRobBuilderBlockSubmission(payload *common.BuilderS
 	}
 
 	if saveExecPayload {
-		err = s.nstmtInsertExecutionPayload.QueryRow(execPayloadEntry).Scan(&execPayloadEntry.ID)
+		err = s.nstmtInsertRobExecutionPayload.QueryRow(execPayloadEntry).Scan(&execPayloadEntry.ID)
 		if err != nil {
 			return nil, err
 		}
