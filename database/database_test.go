@@ -3,7 +3,6 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -32,7 +31,8 @@ const (
 )
 
 var (
-	runDBTests   = os.Getenv("RUN_DB_TESTS") == "1" //|| true
+	//runDBTests   = os.Getenv("RUN_DB_TESTS") == "1" //|| true
+	runDBTests   = true
 	feeRecipient = bellatrix.ExecutionAddress{0x02}
 	blockHashStr = "0xa645370cc112c2e8e3cce121416c7dc849e773506d4b6fb9b752ada711355369"
 	testDBDSN    = common.GetEnv("TEST_DB_DSN", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable")
@@ -48,11 +48,12 @@ var (
 
 func createValidatorRegistration(pubKey string) ValidatorRegistrationEntry {
 	return ValidatorRegistrationEntry{
-		Pubkey:       pubKey,
-		FeeRecipient: "0xffbb8996515293fcd87ca09b5c6ffe5c17f043c6",
-		Timestamp:    1663311456,
-		GasLimit:     30000000,
-		Signature:    "0xab6fa6462f658708f1a9030faeac588d55b1e28cc1f506b3ef938eeeec0171d4209865fb66bbb94e52c0c160a63975e51795ee8d1da38219b3f80d7d14f003421a255d99b744bd71f45f0cb2cd17948afff67ad6c9163fcd20b48f6315dac7cc",
+		Pubkey:             pubKey,
+		FeeRecipient:       "0xffbb8996515293fcd87ca09b5c6ffe5c17f043c6",
+		Timestamp:          1663311456,
+		GasLimit:           30000000,
+		ProposerCommitment: 1,
+		Signature:          "0xab6fa6462f658708f1a9030faeac588d55b1e28cc1f506b3ef938eeeec0171d4209865fb66bbb94e52c0c160a63975e51795ee8d1da38219b3f80d7d14f003421a255d99b744bd71f45f0cb2cd17948afff67ad6c9163fcd20b48f6315dac7cc",
 	}
 }
 
