@@ -969,6 +969,8 @@ func (api *RelayAPI) handleRegisterValidator(w http.ResponseWriter, req *http.Re
 			return nil, fmt.Errorf("invalid propser commitment: %w", err)
 		}
 
+		// TODO - check if proposer commitment is valid.
+
 		// Construct and return full registration object
 		reg = &boostTypes.SignedValidatorRegistration{
 			Message: &boostTypes.RegisterValidatorRequestMessage{
@@ -1785,10 +1787,22 @@ func (api *RelayAPI) handleSubmitNewTobBlock(w http.ResponseWriter, req *http.Re
 	}
 	// END: COPIED FROM handleSubmitNewBlock
 
+	// check if this TOB bid is the highest for this slot, parent hash and pub key
+	tobBid, err := api.redis.GetTopTobBidValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
+	if err != nil && !errors.Is(err, redis.Nil) {
+		log.WithError(err).Error("failed to get top tob bid from redis")
+	}
+	if tobBid != nil {
+		if tobBid.Cmp(payload.Value()) > 0 {
+			log.Info("rejecting submission because tob bid is not the highest")
+			api.RespondError(w, http.StatusBadRequest, "total bid value is lower than the top tob bid value")
+		}
+	}
+
 	// query for the highest ROB value from a builder for this slot, parent hash and pub key
 	robBid, err := api.redis.GetTopRobBidValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
 	if err != nil && !errors.Is(err, redis.Nil) {
-		log.WithError(err).Error("failed to get top tob bid from redis")
+		log.WithError(err).Error("failed to get top rob bid from redis")
 	}
 	if robBid != nil {
 		// check if the value of the sum of the tob and rob bid is the highest for this slot, parent hash and pub key
@@ -1819,6 +1833,12 @@ func (api *RelayAPI) handleSubmitNewTobBlock(w http.ResponseWriter, req *http.Re
 		// build an aggregate bid
 
 		// store the aggregate bid in redis
+
+		// store the aggregated payload in the db
+
+		// store the tob bid in redis (if it's the highest)
+
+		// store the tob payload in the db (if it's the highest)
 
 		// store the final payload in the db
 
@@ -2141,7 +2161,19 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 	}
 	// END: COPIED FROM handleSubmitNewBlock
 
-	// query for the highest ROB value from a builder for this slot, parent hash and pub key
+	// check if this ROB bid is the highest for this slot, parent hash and pub key
+	robBid, err := api.redis.GetTopRobBidValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
+	if err != nil && !errors.Is(err, redis.Nil) {
+		log.WithError(err).Error("failed to get top rob bid from redis")
+	}
+	if robBid != nil {
+		if robBid.Cmp(payload.Value()) > 0 {
+			log.Info("rejecting submission because rob bid is not the highest")
+			api.RespondError(w, http.StatusBadRequest, "total bid value is lower than the top rob bid value")
+		}
+	}
+
+	// query for the highest tob value from a builder for this slot, parent hash and pub key
 	tobBid, err := api.redis.GetTopTobBidValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
 	if err != nil && !errors.Is(err, redis.Nil) {
 		log.WithError(err).Error("failed to get top tob bid from redis")

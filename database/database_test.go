@@ -93,6 +93,54 @@ func insertTestBuilder(t *testing.T, db IDatabaseService) string {
 	return req.BuilderPubkey().String()
 }
 
+func insertTestTobBuilder(t *testing.T, db IDatabaseService) string {
+	t.Helper()
+	pk, sk := getTestKeyPair(t)
+	var testBlockHash phase0.Hash32
+	hashSlice, err := hexutil.Decode(blockHashStr)
+	require.NoError(t, err)
+	copy(testBlockHash[:], hashSlice)
+	req := common.TestBuilderSubmitBlockRequest(sk, &common.BidTraceV2{
+		BidTrace: v1.BidTrace{
+			BlockHash:            testBlockHash,
+			Slot:                 slot,
+			BuilderPubkey:        *pk,
+			ProposerPubkey:       *pk,
+			ProposerFeeRecipient: feeRecipient,
+			Value:                uint256.NewInt(collateral),
+		},
+	})
+	entry, err := db.SaveTobBuilderBlockSubmission(&req, nil, nil, time.Now(), time.Now().Add(time.Second), true, true, profile, false)
+	require.NoError(t, err)
+	err = db.UpsertBlockBuilderEntryAfterSubmission(entry, false)
+	require.NoError(t, err)
+	return req.BuilderPubkey().String()
+}
+
+func insertTestRobBuilder(t *testing.T, db IDatabaseService) string {
+	t.Helper()
+	pk, sk := getTestKeyPair(t)
+	var testBlockHash phase0.Hash32
+	hashSlice, err := hexutil.Decode(blockHashStr)
+	require.NoError(t, err)
+	copy(testBlockHash[:], hashSlice)
+	req := common.TestBuilderSubmitBlockRequest(sk, &common.BidTraceV2{
+		BidTrace: v1.BidTrace{
+			BlockHash:            testBlockHash,
+			Slot:                 slot,
+			BuilderPubkey:        *pk,
+			ProposerPubkey:       *pk,
+			ProposerFeeRecipient: feeRecipient,
+			Value:                uint256.NewInt(collateral),
+		},
+	})
+	entry, err := db.SaveRobBuilderBlockSubmission(&req, nil, nil, time.Now(), time.Now().Add(time.Second), true, true, profile, false)
+	require.NoError(t, err)
+	err = db.UpsertBlockBuilderEntryAfterSubmission(entry, false)
+	require.NoError(t, err)
+	return req.BuilderPubkey().String()
+}
+
 func resetDatabase(t *testing.T) *DatabaseService {
 	t.Helper()
 	if !runDBTests {
@@ -384,6 +432,40 @@ func TestGetBlockSubmissionEntry(t *testing.T) {
 	require.Equal(t, profile.Total, entry.TotalDuration)
 
 	require.True(t, entry.OptimisticSubmission)
+	require.True(t, entry.EligibleAt.Valid)
+}
+
+func TestGetTobBlockSubmissionEntry(t *testing.T) {
+	db := resetDatabase(t)
+	pubkey := insertTestTobBuilder(t, db)
+
+	entry, err := db.GetTobBlockSubmissionEntry(slot, pubkey, blockHashStr)
+	require.NoError(t, err)
+
+	require.Equal(t, profile.Decode, entry.DecodeDuration)
+	require.Equal(t, profile.Prechecks, entry.PrechecksDuration)
+	require.Equal(t, profile.Simulation, entry.SimulationDuration)
+	require.Equal(t, profile.RedisUpdate, entry.RedisUpdateDuration)
+	require.Equal(t, profile.Total, entry.TotalDuration)
+
+	require.False(t, entry.OptimisticSubmission)
+	require.True(t, entry.EligibleAt.Valid)
+}
+
+func TestGetRobBlockSubmissionEntry(t *testing.T) {
+	db := resetDatabase(t)
+	pubkey := insertTestRobBuilder(t, db)
+
+	entry, err := db.GetRobBlockSubmissionEntry(slot, pubkey, blockHashStr)
+	require.NoError(t, err)
+
+	require.Equal(t, profile.Decode, entry.DecodeDuration)
+	require.Equal(t, profile.Prechecks, entry.PrechecksDuration)
+	require.Equal(t, profile.Simulation, entry.SimulationDuration)
+	require.Equal(t, profile.RedisUpdate, entry.RedisUpdateDuration)
+	require.Equal(t, profile.Total, entry.TotalDuration)
+
+	require.False(t, entry.OptimisticSubmission)
 	require.True(t, entry.EligibleAt.Valid)
 }
 
