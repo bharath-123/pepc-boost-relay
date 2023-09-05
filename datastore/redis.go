@@ -462,6 +462,26 @@ func (r *RedisCache) GetBestBid(slot uint64, parentHash, proposerPubkey string) 
 	return resp, err
 }
 
+func (r *RedisCache) GetBestTobBid(slot uint64, parentHash, proposerPubkey string) (*common.GetHeaderResponse, error) {
+	key := r.keyCacheGetTobHeaderResponse(slot, parentHash, proposerPubkey)
+	resp := new(common.GetHeaderResponse)
+	err := r.GetObj(key, resp)
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	return resp, err
+}
+
+func (r *RedisCache) GetBestRobBid(slot uint64, parentHash, proposerPubkey string) (*common.GetHeaderResponse, error) {
+	key := r.keyCacheGetRobHeaderResponse(slot, parentHash, proposerPubkey)
+	resp := new(common.GetHeaderResponse)
+	err := r.GetObj(key, resp)
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	return resp, err
+}
+
 func (r *RedisCache) SaveExecutionPayloadCapella(ctx context.Context, tx redis.Pipeliner, slot uint64, proposerPubkey, blockHash string, execPayload *capella.ExecutionPayload) (err error) {
 	key := r.keyExecPayloadCapella(slot, proposerPubkey, blockHash)
 	b, err := execPayload.MarshalSSZ()
@@ -861,7 +881,7 @@ func (r *RedisCache) SaveBidAndUpdateTopBid(ctx context.Context, tx redis.Pipeli
 	return state, err
 }
 
-func (r *RedisCache) SaveBidAndUpdateTopTobBid(ctx context.Context, tx redis.Pipeliner, trace *common.BidTraceV2, payload *common.BuilderSubmitBlockRequest, getPayloadResponse *common.GetPayloadResponse, getHeaderResponse *common.GetHeaderResponse, reqReceivedAt time.Time, isCancellationEnabled bool) (state SaveBidAndUpdateTopBidResponse, err error) {
+func (r *RedisCache) SaveBidAndUpdateTopTobBid(ctx context.Context, tx redis.Pipeliner, trace *common.BidTraceV2, payload *common.BuilderSubmitBlockRequest, getPayloadResponse *common.GetPayloadResponse, getHeaderResponse *common.GetHeaderResponse, reqReceivedAt time.Time) (state SaveBidAndUpdateTopBidResponse, err error) {
 	var prevTime, nextTime time.Time
 	prevTime = time.Now()
 
@@ -870,16 +890,16 @@ func (r *RedisCache) SaveBidAndUpdateTopTobBid(ctx context.Context, tx redis.Pip
 	if err != nil {
 		return state, err
 	}
-
-	payloadValue := payload.Value()
-
-	// Get the reference top bid value
-	_, state.TopBidValue = builderBids.getTopBid()
-	if payloadValue.Cmp(state.TopBidValue) == 1 {
-		state.TopBidValue = payloadValue
-	} else {
-		return state, nil
-	}
+	//
+	//payloadValue := payload.Value()
+	//
+	//// Get the reference top bid value
+	//_, state.TopBidValue = builderBids.getTopBid()
+	//if payloadValue.Cmp(state.TopBidValue) == 1 {
+	//	state.TopBidValue = payloadValue
+	//} else {
+	//	return state, nil
+	//}
 	state.PrevTopBidValue = state.TopBidValue
 
 	// Record time needed
@@ -925,11 +945,11 @@ func (r *RedisCache) SaveBidAndUpdateTopTobBid(ctx context.Context, tx redis.Pip
 	state.TimeSaveTrace = nextTime.Sub(prevTime)
 	prevTime = nextTime
 
-	// If top bid value hasn't change, abort now
-	_, state.TopBidValue = builderBids.getTopBid()
-	if state.TopBidValue.Cmp(state.PrevTopBidValue) == 0 {
-		return state, nil
-	}
+	//// If top bid value hasn't change, abort now
+	//_, state.TopBidValue = builderBids.getTopBid()
+	//if state.TopBidValue.Cmp(state.PrevTopBidValue) == 0 {
+	//	return state, nil
+	//}
 
 	state, err = r._updateTopTobBid(ctx, tx, state, builderBids, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
 	if err != nil {
@@ -945,7 +965,7 @@ func (r *RedisCache) SaveBidAndUpdateTopTobBid(ctx context.Context, tx redis.Pip
 	return state, err
 }
 
-func (r *RedisCache) SaveBidAndUpdateTopRobBid(ctx context.Context, tx redis.Pipeliner, trace *common.BidTraceV2, payload *common.BuilderSubmitBlockRequest, getPayloadResponse *common.GetPayloadResponse, getHeaderResponse *common.GetHeaderResponse, reqReceivedAt time.Time, isCancellationEnabled bool) (state SaveBidAndUpdateTopBidResponse, err error) {
+func (r *RedisCache) SaveBidAndUpdateTopRobBid(ctx context.Context, tx redis.Pipeliner, trace *common.BidTraceV2, payload *common.BuilderSubmitBlockRequest, getPayloadResponse *common.GetPayloadResponse, getHeaderResponse *common.GetHeaderResponse, reqReceivedAt time.Time) (state SaveBidAndUpdateTopBidResponse, err error) {
 	var prevTime, nextTime time.Time
 	prevTime = time.Now()
 
@@ -955,16 +975,16 @@ func (r *RedisCache) SaveBidAndUpdateTopRobBid(ctx context.Context, tx redis.Pip
 		return state, err
 	}
 
-	payloadValue := payload.Value()
+	//payloadValue := payload.Value()
 
 	// Get the reference top bid value
-	_, state.TopBidValue = builderBids.getTopBid()
-	if payloadValue.Cmp(state.TopBidValue) == 1 {
-		state.TopBidValue = payloadValue
-	} else {
-		// if it is not higher than previous top bid, we can ignore
-		return state, nil
-	}
+	//_, state.TopBidValue = builderBids.getTopBid()
+	//if payloadValue.Cmp(state.TopBidValue) == 1 {
+	//	state.TopBidValue = payloadValue
+	//} else {
+	//	// if it is not higher than previous top bid, we can ignore
+	//	return state, nil
+	//}
 
 	state.PrevTopBidValue = state.TopBidValue
 
@@ -1012,10 +1032,10 @@ func (r *RedisCache) SaveBidAndUpdateTopRobBid(ctx context.Context, tx redis.Pip
 	prevTime = nextTime
 
 	// If top bid value hasn't change, abort now
-	_, state.TopBidValue = builderBids.getTopBid()
-	if state.TopBidValue.Cmp(state.PrevTopBidValue) == 0 {
-		return state, nil
-	}
+	//_, state.TopBidValue = builderBids.getTopBid()
+	//if state.TopBidValue.Cmp(state.PrevTopBidValue) == 0 {
+	//	return state, nil
+	//}
 
 	state, err = r._updateTopRobBid(ctx, tx, state, builderBids, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
 	if err != nil {

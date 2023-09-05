@@ -252,3 +252,25 @@ func (r *BuilderBlockValidationRequest) MarshalJSON() ([]byte, error) {
 	gasLimit[0] = ','
 	return append(blockRequest[:len(blockRequest)-1], gasLimit...), nil
 }
+
+type BlockAssemblerRequest struct {
+	BuilderSubmitBlockRequest
+	RegisteredGasLimit uint64 `json:"registered_gas_limit,string"`
+}
+
+func (r *BuilderBlockValidationRequest) MarshalJSON() ([]byte, error) {
+	blockRequest, err := r.BuilderSubmitBlockRequest.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	gasLimit, err := json.Marshal(&struct {
+		RegisteredGasLimit uint64 `json:"registered_gas_limit,string"`
+	}{
+		RegisteredGasLimit: r.RegisteredGasLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	gasLimit[0] = ','
+	return append(blockRequest[:len(blockRequest)-1], gasLimit...), nil
+}
