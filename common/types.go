@@ -16,6 +16,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	consensuscapella "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/ethereum/go-ethereum/core/types"
 	boostTypes "github.com/flashbots/go-boost-utils/types"
 )
 
@@ -446,6 +447,70 @@ func (e *VersionedExecutionPayload) NumTx() int {
 		return len(e.Bellatrix.Data.Transactions)
 	}
 	return 0
+}
+
+func encodeTransactions(txs []*types.Transaction) [][]byte {
+	var enc = make([][]byte, len(txs))
+	for i, tx := range txs {
+		enc[i], _ = tx.MarshalBinary()
+	}
+	return enc
+}
+
+func DecodeTransactions(enc [][]byte) ([]*types.Transaction, error) {
+	var txs = make([]*types.Transaction, len(enc))
+	for i, encTx := range enc {
+		var tx types.Transaction
+		if err := tx.UnmarshalBinary(encTx); err != nil {
+			return nil, fmt.Errorf("invalid transaction %d: %v", i, err)
+		}
+		txs[i] = &tx
+	}
+	return txs, nil
+}
+
+type TobTxsSubmitRequest struct {
+	TobTxs     boostTypes.Transactions
+	Slot       uint64
+	ParentHash string
+}
+
+func (t *TobTxsSubmitRequest) MarshalJSON() ([]byte, error) {
+	txBytes, err := t.TobTxs.MarshalSSZ()
+	if err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(struct {
+		TobTxs     []byte `json:"tobTxs"`
+		Slot       uint64 `json:"slot"`
+		ParentHash string `json:"parentHash"`
+	}{
+		TobTxs:     txBytes,
+		Slot:       t.Slot,
+		ParentHash: t.ParentHash,
+	})
+}
+
+func (t *TobTxsSubmitRequest) UnmarshalJSON(data []byte) error {
+	var intermediateJson struct {
+		TobTxs     []byte `json:"tobTxs"`
+		Slot       uint64 `json:"slot"`
+		ParentHash string `json:"parentHash"`
+	}
+	err := json.Unmarshal(data, &intermediateJson)
+	if err != nil {
+		return err
+	}
+
+	err = t.TobTxs.UnmarshalSSZ(intermediateJson.TobTxs)
+	if err != nil {
+		return err
+	}
+	t.Slot = intermediateJson.Slot
+	t.ParentHash = intermediateJson.ParentHash
+
+	return nil
 }
 
 type BuilderSubmitBlockRequest struct {

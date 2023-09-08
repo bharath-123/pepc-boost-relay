@@ -28,36 +28,6 @@ func NewBuilderBidsFromRedis(ctx context.Context, r *RedisCache, tx redis.Pipeli
 	return NewBuilderBids(bidValueMap), nil
 }
 
-func NewBuilderTobBidsFromRedis(ctx context.Context, r *RedisCache, tx redis.Pipeliner, slot uint64, parentHash, proposerPubkey string) (*BuilderBids, error) {
-	keyBidValues := r.keyBlockBuilderLatestTobBidsValue(slot, parentHash, proposerPubkey)
-	c := tx.HGetAll(ctx, keyBidValues)
-	_, err := tx.Exec(ctx)
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return nil, err
-	}
-
-	bidValueMap, err := c.Result()
-	if err != nil {
-		return nil, err
-	}
-	return NewBuilderBids(bidValueMap), nil
-}
-
-func NewBuilderRobBidsFromRedis(ctx context.Context, r *RedisCache, tx redis.Pipeliner, slot uint64, parentHash, proposerPubkey string) (*BuilderBids, error) {
-	keyBidValues := r.keyBlockBuilderLatestRobBidsValue(slot, parentHash, proposerPubkey)
-	c := tx.HGetAll(ctx, keyBidValues)
-	_, err := tx.Exec(ctx)
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return nil, err
-	}
-
-	bidValueMap, err := c.Result()
-	if err != nil {
-		return nil, err
-	}
-	return NewBuilderBids(bidValueMap), nil
-}
-
 func NewBuilderBids(bidValueMap map[string]string) *BuilderBids {
 	b := BuilderBids{
 		bidValues: make(map[string]*big.Int),

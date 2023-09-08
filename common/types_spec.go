@@ -253,24 +253,24 @@ func (r *BuilderBlockValidationRequest) MarshalJSON() ([]byte, error) {
 	return append(blockRequest[:len(blockRequest)-1], gasLimit...), nil
 }
 
-type BlockAssemblerRequest struct {
-	BuilderSubmitBlockRequest
-	RegisteredGasLimit uint64 `json:"registered_gas_limit,string"`
+type PayloadAttributes struct {
+	Timestamp             uint64                         `json:"timestamp,string"`
+	PrevRandao            string                         `json:"prev_randao"`
+	SuggestedFeeRecipient string                         `json:"suggested_fee_recipient"`
+	Withdrawals           []*consensuscapella.Withdrawal `json:"withdrawals"`
 }
 
-func (r *BuilderBlockValidationRequest) MarshalJSON() ([]byte, error) {
-	blockRequest, err := r.BuilderSubmitBlockRequest.MarshalJSON()
-	if err != nil {
-		return nil, err
-	}
-	gasLimit, err := json.Marshal(&struct {
-		RegisteredGasLimit uint64 `json:"registered_gas_limit,string"`
-	}{
-		RegisteredGasLimit: r.RegisteredGasLimit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	gasLimit[0] = ','
-	return append(blockRequest[:len(blockRequest)-1], gasLimit...), nil
+type BlockAssemblerRequest struct {
+	TobTxs             [][]byte                   `json:"tob_txs"`
+	RobPayload         *BuilderSubmitBlockRequest `json:"rob_payload"`
+	RegisteredGasLimit uint64                     `json:"registered_gas_limit,string"`
+	PayloadAttributes  *PayloadAttributes         `json:"payload_attributes"`
+}
+
+func (r *BlockAssemblerRequest) MarshalJSON() ([]byte, error) {
+	return r.MarshalJSON()
+}
+
+func (r *BlockAssemblerRequest) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, r)
 }

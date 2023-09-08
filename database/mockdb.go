@@ -40,23 +40,7 @@ func (db MockDB) SaveBuilderBlockSubmission(payload *common.BuilderSubmitBlockRe
 	return nil, nil
 }
 
-func (db MockDB) SaveTobBuilderBlockSubmission(payload *common.BuilderSubmitBlockRequest, requestError, validationError error, receivedAt, eligibleAt time.Time, wasSimulated, saveExecPayload bool, profile common.Profile, optimisticSubmission bool) (entry *BuilderBlockSubmissionEntry, err error) {
-	return nil, nil
-}
-
-func (db MockDB) SaveRobBuilderBlockSubmission(payload *common.BuilderSubmitBlockRequest, requestError, validationError error, receivedAt, eligibleAt time.Time, wasSimulated, saveExecPayload bool, profile common.Profile, optimisticSubmission bool) (entry *BuilderBlockSubmissionEntry, err error) {
-	return nil, nil
-}
-
 func (db MockDB) GetExecutionPayloadEntryByID(executionPayloadID int64) (entry *ExecutionPayloadEntry, err error) {
-	return nil, nil
-}
-
-func (db MockDB) GetTobExecutionPayloadEntryByID(executionPayloadID int64) (entry *ExecutionPayloadEntry, err error) {
-	return nil, nil
-}
-
-func (db MockDB) GetRobExecutionPayloadEntryByID(executionPayloadID int64) (entry *ExecutionPayloadEntry, err error) {
 	return nil, nil
 }
 
@@ -69,33 +53,7 @@ func (db MockDB) GetExecutionPayloadEntryBySlotPkHash(slot uint64, proposerPubke
 	return entry, nil
 }
 
-func (db MockDB) GetTobExecutionPayloadEntryBySlotPkHash(slot uint64, proposerPubkey, blockHash string) (entry *ExecutionPayloadEntry, err error) {
-	key := fmt.Sprintf("%s-%d-%s-%s", "tob", slot, proposerPubkey, blockHash)
-	entry, ok := db.ExecPayloads[key]
-	if !ok {
-		return nil, sql.ErrNoRows
-	}
-	return entry, nil
-}
-
-func (db MockDB) GetRobExecutionPayloadEntryBySlotPkHash(slot uint64, proposerPubkey, blockHash string) (entry *ExecutionPayloadEntry, err error) {
-	key := fmt.Sprintf("%s-%d-%s-%s", "rob", slot, proposerPubkey, blockHash)
-	entry, ok := db.ExecPayloads[key]
-	if !ok {
-		return nil, sql.ErrNoRows
-	}
-	return entry, nil
-}
-
 func (db MockDB) GetExecutionPayloads(idFirst, idLast uint64) (entries []*ExecutionPayloadEntry, err error) {
-	return nil, nil
-}
-
-func (db MockDB) GetTobExecutionPayloads(idFirst, idLast uint64) (entries []*ExecutionPayloadEntry, err error) {
-	return nil, nil
-}
-
-func (db MockDB) GetRobExecutionPayloads(idFirst, idLast uint64) (entries []*ExecutionPayloadEntry, err error) {
 	return nil, nil
 }
 
@@ -103,23 +61,7 @@ func (db MockDB) DeleteExecutionPayloads(idFirst, idLast uint64) error {
 	return nil
 }
 
-func (db MockDB) DeleteTobExecutionPayloads(idFirst, idLast uint64) error {
-	return nil
-}
-
-func (db MockDB) DeleteRobExecutionPayloads(idFirst, idLast uint64) error {
-	return nil
-}
-
 func (db MockDB) GetBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error) {
-	return nil, nil
-}
-
-func (db MockDB) GetTobBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error) {
-	return nil, nil
-}
-
-func (db MockDB) GetRobBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error) {
 	return nil, nil
 }
 
@@ -139,23 +81,7 @@ func (db MockDB) GetBuilderSubmissions(filters GetBuilderSubmissionsFilters) ([]
 	return nil, nil
 }
 
-func (db MockDB) GetTobBuilderSubmissions(filters GetBuilderSubmissionsFilters) ([]*BuilderBlockSubmissionEntry, error) {
-	return nil, nil
-}
-
-func (db MockDB) GetRobBuilderSubmissions(filters GetBuilderSubmissionsFilters) ([]*BuilderBlockSubmissionEntry, error) {
-	return nil, nil
-}
-
 func (db MockDB) GetBuilderSubmissionsBySlots(slotFrom, slotTo uint64) (entries []*BuilderBlockSubmissionEntry, err error) {
-	return nil, nil
-}
-
-func (db MockDB) GetTobBuilderSubmissionsBySlots(slotFrom, slotTo uint64) (entries []*BuilderBlockSubmissionEntry, err error) {
-	return nil, nil
-}
-
-func (db MockDB) GetRobBuilderSubmissionsBySlots(slotFrom, slotTo uint64) (entries []*BuilderBlockSubmissionEntry, err error) {
 	return nil, nil
 }
 

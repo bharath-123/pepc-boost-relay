@@ -48,12 +48,11 @@ var (
 
 func createValidatorRegistration(pubKey string) ValidatorRegistrationEntry {
 	return ValidatorRegistrationEntry{
-		Pubkey:             pubKey,
-		FeeRecipient:       "0xffbb8996515293fcd87ca09b5c6ffe5c17f043c6",
-		Timestamp:          1663311456,
-		GasLimit:           30000000,
-		ProposerCommitment: 1,
-		Signature:          "0xab6fa6462f658708f1a9030faeac588d55b1e28cc1f506b3ef938eeeec0171d4209865fb66bbb94e52c0c160a63975e51795ee8d1da38219b3f80d7d14f003421a255d99b744bd71f45f0cb2cd17948afff67ad6c9163fcd20b48f6315dac7cc",
+		Pubkey:       pubKey,
+		FeeRecipient: "0xffbb8996515293fcd87ca09b5c6ffe5c17f043c6",
+		Timestamp:    1663311456,
+		GasLimit:     30000000,
+		Signature:    "0xab6fa6462f658708f1a9030faeac588d55b1e28cc1f506b3ef938eeeec0171d4209865fb66bbb94e52c0c160a63975e51795ee8d1da38219b3f80d7d14f003421a255d99b744bd71f45f0cb2cd17948afff67ad6c9163fcd20b48f6315dac7cc",
 	}
 }
 
@@ -87,54 +86,6 @@ func insertTestBuilder(t *testing.T, db IDatabaseService) string {
 		},
 	})
 	entry, err := db.SaveBuilderBlockSubmission(&req, nil, nil, time.Now(), time.Now().Add(time.Second), true, true, profile, optimisticSubmission)
-	require.NoError(t, err)
-	err = db.UpsertBlockBuilderEntryAfterSubmission(entry, false)
-	require.NoError(t, err)
-	return req.BuilderPubkey().String()
-}
-
-func insertTestTobBuilder(t *testing.T, db IDatabaseService) string {
-	t.Helper()
-	pk, sk := getTestKeyPair(t)
-	var testBlockHash phase0.Hash32
-	hashSlice, err := hexutil.Decode(blockHashStr)
-	require.NoError(t, err)
-	copy(testBlockHash[:], hashSlice)
-	req := common.TestBuilderSubmitBlockRequest(sk, &common.BidTraceV2{
-		BidTrace: v1.BidTrace{
-			BlockHash:            testBlockHash,
-			Slot:                 slot,
-			BuilderPubkey:        *pk,
-			ProposerPubkey:       *pk,
-			ProposerFeeRecipient: feeRecipient,
-			Value:                uint256.NewInt(collateral),
-		},
-	})
-	entry, err := db.SaveTobBuilderBlockSubmission(&req, nil, nil, time.Now(), time.Now().Add(time.Second), true, true, profile, false)
-	require.NoError(t, err)
-	err = db.UpsertBlockBuilderEntryAfterSubmission(entry, false)
-	require.NoError(t, err)
-	return req.BuilderPubkey().String()
-}
-
-func insertTestRobBuilder(t *testing.T, db IDatabaseService) string {
-	t.Helper()
-	pk, sk := getTestKeyPair(t)
-	var testBlockHash phase0.Hash32
-	hashSlice, err := hexutil.Decode(blockHashStr)
-	require.NoError(t, err)
-	copy(testBlockHash[:], hashSlice)
-	req := common.TestBuilderSubmitBlockRequest(sk, &common.BidTraceV2{
-		BidTrace: v1.BidTrace{
-			BlockHash:            testBlockHash,
-			Slot:                 slot,
-			BuilderPubkey:        *pk,
-			ProposerPubkey:       *pk,
-			ProposerFeeRecipient: feeRecipient,
-			Value:                uint256.NewInt(collateral),
-		},
-	})
-	entry, err := db.SaveRobBuilderBlockSubmission(&req, nil, nil, time.Now(), time.Now().Add(time.Second), true, true, profile, false)
 	require.NoError(t, err)
 	err = db.UpsertBlockBuilderEntryAfterSubmission(entry, false)
 	require.NoError(t, err)
@@ -432,40 +383,6 @@ func TestGetBlockSubmissionEntry(t *testing.T) {
 	require.Equal(t, profile.Total, entry.TotalDuration)
 
 	require.True(t, entry.OptimisticSubmission)
-	require.True(t, entry.EligibleAt.Valid)
-}
-
-func TestGetTobBlockSubmissionEntry(t *testing.T) {
-	db := resetDatabase(t)
-	pubkey := insertTestTobBuilder(t, db)
-
-	entry, err := db.GetTobBlockSubmissionEntry(slot, pubkey, blockHashStr)
-	require.NoError(t, err)
-
-	require.Equal(t, profile.Decode, entry.DecodeDuration)
-	require.Equal(t, profile.Prechecks, entry.PrechecksDuration)
-	require.Equal(t, profile.Simulation, entry.SimulationDuration)
-	require.Equal(t, profile.RedisUpdate, entry.RedisUpdateDuration)
-	require.Equal(t, profile.Total, entry.TotalDuration)
-
-	require.False(t, entry.OptimisticSubmission)
-	require.True(t, entry.EligibleAt.Valid)
-}
-
-func TestGetRobBlockSubmissionEntry(t *testing.T) {
-	db := resetDatabase(t)
-	pubkey := insertTestRobBuilder(t, db)
-
-	entry, err := db.GetRobBlockSubmissionEntry(slot, pubkey, blockHashStr)
-	require.NoError(t, err)
-
-	require.Equal(t, profile.Decode, entry.DecodeDuration)
-	require.Equal(t, profile.Prechecks, entry.PrechecksDuration)
-	require.Equal(t, profile.Simulation, entry.SimulationDuration)
-	require.Equal(t, profile.RedisUpdate, entry.RedisUpdateDuration)
-	require.Equal(t, profile.Total, entry.TotalDuration)
-
-	require.False(t, entry.OptimisticSubmission)
 	require.True(t, entry.EligibleAt.Valid)
 }
 

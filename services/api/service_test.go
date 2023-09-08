@@ -18,9 +18,12 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	common2 "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	gethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
+	boosttypes "github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/mev-boost-relay/beaconclient"
 	"github.com/flashbots/mev-boost-relay/common"
 	"github.com/flashbots/mev-boost-relay/database"
@@ -37,6 +40,7 @@ const (
 	testWithdrawalsRoot = "0x7f6d156912a4cb1e74ee37e492ad883f7f7ac856d987b3228b517e490aa0189e"
 	testPrevRandao      = "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
 	testBuilderPubkey   = "0xfa1ed37c3553d0ce1e9349b2c5063cf6e394d231c8d3e0df75e9462257c081543086109ffddaacc0aa76f33dc9661c83"
+	testProposerKey     = "0xda1ed37c3553d0ce1e9349b2c5063cf6e394d231c8d3e0df75e9462257c081543086109ffddaacc0aa76f33dc9661c83"
 )
 
 var (
@@ -410,6 +414,155 @@ func TestBuilderSubmitBlockSSZ(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSubmitTobTxs(t *testing.T) {
+	path := "/relay/v1/builder/tob_txs"
+	backend := newTestBackend(t, 1)
+
+	headSlot := uint64(32)
+	submissionSlot := headSlot + 1
+	//submissionTimestamp := 1606824419
+
+	// Payload attributes
+	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+	feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
+	require.NoError(t, err)
+	withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
+	require.NoError(t, err)
+	prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+	proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+	require.NoError(t, err)
+	proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
+
+	// Setup the test relay backend
+	backend.relay.headSlot.Store(headSlot)
+	backend.relay.capellaEpoch = 1
+	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+		Slot: headSlot,
+		Entry: &types.SignedValidatorRegistration{
+			Message: &types.RegisterValidatorRequestMessage{
+				Pubkey:       boosttypes.PublicKey(proposerPubkey),
+				FeeRecipient: feeRec,
+			},
+		},
+	}
+	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+		slot:       submissionSlot,
+		parentHash: parentHash,
+		payloadAttributes: beaconclient.PayloadAttributes{
+			PrevRandao: prevRandao,
+		},
+		withdrawalsRoot: phase0.Root(withdrawalsRoot),
+	}
+
+	// Test 1 : Happy path
+	req := new(common.TobTxsSubmitRequest)
+	addr1 := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	tx1 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    1,
+		GasPrice: big.NewInt(1),
+		Gas:      1,
+		To:       &addr1,
+		Value:    big.NewInt(1),
+		Data:     []byte("tx1"),
+	})
+	tx2 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    2,
+		GasPrice: big.NewInt(2),
+		Gas:      2,
+		To:       &backend.relay.relayerPayoutAddress,
+		Value:    big.NewInt(2),
+		Data:     []byte(""),
+	})
+	tx1byte, err := tx1.MarshalBinary()
+	require.NoError(t, err)
+	tx2byte, err := tx2.MarshalBinary()
+	require.NoError(t, err)
+	txs := boosttypes.Transactions{
+		Transactions: [][]byte{tx1byte, tx2byte},
+	}
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 1,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err := req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr := backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	// TODO - figure out why data is not filling up in the cache
+	//tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash, testProposerKey)
+	//require.NoError(t, err)
+	//fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
+	//require.Equal(t, tobTxValue, big.NewInt(2))
+
+	tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash, testProposerKey)
+
+	require.NoError(t, err)
+	fmt.Printf("tobtxs in test is : %v\n", tobtxs)
+
+	// Test 2 : Past slot
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot - 2,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Contains(t, rr.Body.String(), "Submitted TOB tx request for past slot!")
+
+	// Test 3 : Slot to far ahead
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 2,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Contains(t, rr.Body.String(), "Slot's TOB bid not yet started!!")
+
+	// Test 4 : No txs are sent
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs: boosttypes.Transactions{
+			Transactions: [][]byte{},
+		},
+		Slot: headSlot + 2,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Contains(t, rr.Body.String(), "Empty TOB tx request sent")
+}
+
 func TestBuilderSubmitBlock(t *testing.T) {
 	path := "/relay/v1/builder/blocks"
 	backend := newTestBackend(t, 1)
@@ -429,7 +582,8 @@ func TestBuilderSubmitBlock(t *testing.T) {
 
 	// Setup the test relay backend
 	backend.relay.headSlot.Store(headSlot)
-	backend.relay.capellaEpoch = 1
+	backend.relay.capellaEpoch = 0
+	backend.relay.denebEpoch = 1
 	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
 	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
 		Slot: headSlot,

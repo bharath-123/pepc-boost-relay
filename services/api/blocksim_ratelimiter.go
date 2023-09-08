@@ -23,8 +23,9 @@ var (
 	ErrJSONDecodeFailed = errors.New("json error")
 	ErrNoCapellaPayload = errors.New("capella payload is nil")
 
-	maxConcurrentBlocks = int64(cli.GetEnvInt("BLOCKSIM_MAX_CONCURRENT", 4)) // 0 for no maximum
-	simRequestTimeout   = time.Duration(cli.GetEnvInt("BLOCKSIM_TIMEOUT_MS", 10000)) * time.Millisecond
+	maxConcurrentBlocks    = int64(cli.GetEnvInt("BLOCKSIM_MAX_CONCURRENT", 4)) // 0 for no maximum
+	simRequestTimeout      = time.Duration(cli.GetEnvInt("BLOCKSIM_TIMEOUT_MS", 10000)) * time.Millisecond
+	assemblyRequestTimeout = time.Duration(cli.GetEnvInt("BLOCKASSEMBLY_TIMEOUT_MS", 60000)) * time.Millisecond
 )
 
 type IBlockSimRateLimiter interface {

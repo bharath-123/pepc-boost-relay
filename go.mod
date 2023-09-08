@@ -2,10 +2,6 @@ module github.com/flashbots/mev-boost-relay
 
 go 1.20
 
-replace github.com/attestantio/go-builder-client => github.com/bharath-123/go-builder-client v0.0.0-20230825164349-8d72870ed37c
-
-replace github.com/flashbots/go-boost-utils => github.com/bharath-123/go-boost-utils v0.0.0-20230825174753-df68cecbf024
-
 require (
 	github.com/NYTimes/gziphandler v1.1.1
 	github.com/alicebob/miniredis/v2 v2.30.4

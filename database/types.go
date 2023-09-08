@@ -53,12 +53,11 @@ type ValidatorRegistrationEntry struct {
 	ID         int64     `db:"id"`
 	InsertedAt time.Time `db:"inserted_at"`
 
-	Pubkey             string `db:"pubkey"`
-	FeeRecipient       string `db:"fee_recipient"`
-	Timestamp          uint64 `db:"timestamp"`
-	GasLimit           uint64 `db:"gas_limit"`
-	Signature          string `db:"signature"`
-	ProposerCommitment uint64 `db:"proposer_commitment"`
+	Pubkey       string `db:"pubkey"`
+	FeeRecipient string `db:"fee_recipient"`
+	Timestamp    uint64 `db:"timestamp"`
+	GasLimit     uint64 `db:"gas_limit"`
+	Signature    string `db:"signature"`
 }
 
 func (reg ValidatorRegistrationEntry) ToSignedValidatorRegistration() (*types.SignedValidatorRegistration, error) {
@@ -79,11 +78,10 @@ func (reg ValidatorRegistrationEntry) ToSignedValidatorRegistration() (*types.Si
 
 	return &types.SignedValidatorRegistration{
 		Message: &types.RegisterValidatorRequestMessage{
-			Pubkey:             pubkey,
-			FeeRecipient:       feeRec,
-			Timestamp:          reg.Timestamp,
-			GasLimit:           reg.GasLimit,
-			ProposerCommitment: reg.ProposerCommitment,
+			Pubkey:       pubkey,
+			FeeRecipient: feeRec,
+			Timestamp:    reg.Timestamp,
+			GasLimit:     reg.GasLimit,
 		},
 		Signature: sig,
 	}, nil
@@ -91,12 +89,11 @@ func (reg ValidatorRegistrationEntry) ToSignedValidatorRegistration() (*types.Si
 
 func SignedValidatorRegistrationToEntry(valReg types.SignedValidatorRegistration) ValidatorRegistrationEntry {
 	return ValidatorRegistrationEntry{
-		Pubkey:             valReg.Message.Pubkey.String(),
-		FeeRecipient:       valReg.Message.FeeRecipient.String(),
-		Timestamp:          valReg.Message.Timestamp,
-		GasLimit:           valReg.Message.GasLimit,
-		Signature:          valReg.Signature.String(),
-		ProposerCommitment: valReg.Message.ProposerCommitment,
+		Pubkey:       valReg.Message.Pubkey.String(),
+		FeeRecipient: valReg.Message.FeeRecipient.String(),
+		Timestamp:    valReg.Message.Timestamp,
+		GasLimit:     valReg.Message.GasLimit,
+		Signature:    valReg.Signature.String(),
 	}
 }
 

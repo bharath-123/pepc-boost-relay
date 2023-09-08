@@ -37,79 +37,11 @@ func (m *Memcached) SaveExecutionPayload(slot uint64, proposerPubKey, blockHash 
 	return m.client.Set(&memcache.Item{Key: key, Value: bytes, Expiration: defaultMemcachedExpirySeconds})
 }
 
-// SaveExecutionPayload attempts to insert execution engine payload to memcached using composite key of slot,
-// proposer public key, block hash, and cache prefix if specified. Note that writes to the same key value
-// (i.e. same slot, proposer public key, and block hash) will overwrite the existing entry.
-func (m *Memcached) SaveTobExecutionPayload(slot uint64, proposerPubKey, blockHash string, payload *common.GetPayloadResponse) error {
-	// TODO: standardize key format with redis cache and re-use the same function(s)
-	key := fmt.Sprintf("boost-relay/%s:cache-gettobpayload-response:%d_%s_%s", m.keyPrefix, slot, proposerPubKey, blockHash)
-
-	bytes, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	//nolint:exhaustruct // "Flags" variable unused and opaque server-side
-	return m.client.Set(&memcache.Item{Key: key, Value: bytes, Expiration: defaultMemcachedExpirySeconds})
-}
-
-// SaveExecutionPayload attempts to insert execution engine payload to memcached using composite key of slot,
-// proposer public key, block hash, and cache prefix if specified. Note that writes to the same key value
-// (i.e. same slot, proposer public key, and block hash) will overwrite the existing entry.
-func (m *Memcached) SaveRobExecutionPayload(slot uint64, proposerPubKey, blockHash string, payload *common.GetPayloadResponse) error {
-	// TODO: standardize key format with redis cache and re-use the same function(s)
-	key := fmt.Sprintf("boost-relay/%s:cache-getrobpayload-response:%d_%s_%s", m.keyPrefix, slot, proposerPubKey, blockHash)
-
-	bytes, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	//nolint:exhaustruct // "Flags" variable unused and opaque server-side
-	return m.client.Set(&memcache.Item{Key: key, Value: bytes, Expiration: defaultMemcachedExpirySeconds})
-}
-
 // GetExecutionPayload attempts to fetch execution engine payload from memcached using composite key of slot,
 // proposer public key, block hash, and cache prefix if specified.
 func (m *Memcached) GetExecutionPayload(slot uint64, proposerPubKey, blockHash string) (*common.VersionedExecutionPayload, error) {
 	// TODO: standardize key format with redis cache and re-use the same function(s)
 	key := fmt.Sprintf("boost-relay/%s:cache-getpayload-response:%d_%s_%s", m.keyPrefix, slot, proposerPubKey, blockHash)
-	item, err := m.client.Get(key)
-	if err != nil {
-		return nil, err
-	}
-
-	result := new(common.VersionedExecutionPayload)
-	if err = result.UnmarshalJSON(item.Value); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-// GetExecutionPayload attempts to fetch execution engine payload from memcached using composite key of slot,
-// proposer public key, block hash, and cache prefix if specified.
-func (m *Memcached) GetTobExecutionPayload(slot uint64, proposerPubKey, blockHash string) (*common.VersionedExecutionPayload, error) {
-	// TODO: standardize key format with redis cache and re-use the same function(s)
-	key := fmt.Sprintf("boost-relay/%s:cache-gettobpayload-response:%d_%s_%s", m.keyPrefix, slot, proposerPubKey, blockHash)
-	item, err := m.client.Get(key)
-	if err != nil {
-		return nil, err
-	}
-
-	result := new(common.VersionedExecutionPayload)
-	if err = result.UnmarshalJSON(item.Value); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-// GetExecutionPayload attempts to fetch execution engine payload from memcached using composite key of slot,
-// proposer public key, block hash, and cache prefix if specified.
-func (m *Memcached) GetRobExecutionPayload(slot uint64, proposerPubKey, blockHash string) (*common.VersionedExecutionPayload, error) {
-	// TODO: standardize key format with redis cache and re-use the same function(s)
-	key := fmt.Sprintf("boost-relay/%s:cache-getrobpayload-response:%d_%s_%s", m.keyPrefix, slot, proposerPubKey, blockHash)
 	item, err := m.client.Get(key)
 	if err != nil {
 		return nil, err
