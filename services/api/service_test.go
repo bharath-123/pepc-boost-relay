@@ -18,6 +18,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	bellatrixUtil "github.com/attestantio/go-eth2-client/util/bellatrix"
 	common2 "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	gethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -480,9 +481,7 @@ func TestSubmitTobTxs(t *testing.T) {
 	require.NoError(t, err)
 	tx2byte, err := tx2.MarshalBinary()
 	require.NoError(t, err)
-	txs := boosttypes.Transactions{
-		Transactions: [][]byte{tx1byte, tx2byte},
-	}
+	txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx1byte, tx2byte}}
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
 		TobTxs:     txs,
@@ -498,18 +497,169 @@ func TestSubmitTobTxs(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, rr.Code)
 
-	// TODO - figure out why data is not filling up in the cache
-	//tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash, testProposerKey)
-	//require.NoError(t, err)
-	//fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
-	//require.Equal(t, tobTxValue, big.NewInt(2))
-
-	tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash, testProposerKey)
-
+	tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
 	require.NoError(t, err)
-	fmt.Printf("tobtxs in test is : %v\n", tobtxs)
+	fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
+	require.Equal(t, tobTxValue, big.NewInt(2))
 
-	// Test 2 : Past slot
+	tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, len(tobtxs))
+
+	firstTx := new(gethtypes.Transaction)
+	err = firstTx.UnmarshalBinary(tobtxs[0])
+
+	firstTxJson, err := firstTx.MarshalJSON()
+	require.NoError(t, err)
+	tx1Json, err := tx1.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, firstTxJson, tx1Json)
+
+	secondTx := new(gethtypes.Transaction)
+	err = secondTx.UnmarshalBinary(tobtxs[1])
+	secondTxJson, err := secondTx.MarshalJSON()
+	require.NoError(t, err)
+	tx2Json, err := tx2.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, secondTxJson, tx2Json)
+
+	// Test 2: Try adding txs with higher value
+	req = new(common.TobTxsSubmitRequest)
+	addr1 = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	tx3 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    3,
+		GasPrice: big.NewInt(3),
+		Gas:      3,
+		To:       &addr1,
+		Value:    big.NewInt(3),
+		Data:     []byte("tx3"),
+	})
+	tx4 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    4,
+		GasPrice: big.NewInt(5),
+		Gas:      12,
+		To:       &backend.relay.relayerPayoutAddress,
+		Value:    big.NewInt(10),
+		Data:     []byte(""),
+	})
+	tx3byte, err := tx3.MarshalBinary()
+	require.NoError(t, err)
+	tx4byte, err := tx4.MarshalBinary()
+	require.NoError(t, err)
+	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx3byte, tx4byte}}
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 1,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	tobTxValue, err = backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+	fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
+	require.Equal(t, tobTxValue, big.NewInt(10))
+
+	tobtxs, err = backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, len(tobtxs))
+
+	firstTx = new(gethtypes.Transaction)
+	err = firstTx.UnmarshalBinary(tobtxs[0])
+
+	firstTxJson, err = firstTx.MarshalJSON()
+	require.NoError(t, err)
+	tx1Json, err = tx3.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, firstTxJson, tx1Json)
+
+	secondTx = new(gethtypes.Transaction)
+	err = secondTx.UnmarshalBinary(tobtxs[1])
+	secondTxJson, err = secondTx.MarshalJSON()
+	require.NoError(t, err)
+	tx2Json, err = tx4.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, secondTxJson, tx2Json)
+
+	// Test 3: Try adding txs with lower value
+	req = new(common.TobTxsSubmitRequest)
+	addr1 = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	tx5 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    3,
+		GasPrice: big.NewInt(3),
+		Gas:      3,
+		To:       &addr1,
+		Value:    big.NewInt(3),
+		Data:     []byte("tx6"),
+	})
+	tx6 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    4,
+		GasPrice: big.NewInt(5),
+		Gas:      12,
+		To:       &backend.relay.relayerPayoutAddress,
+		Value:    big.NewInt(5),
+		Data:     []byte(""),
+	})
+	tx5byte, err := tx5.MarshalBinary()
+	require.NoError(t, err)
+	tx6byte, err := tx6.MarshalBinary()
+	require.NoError(t, err)
+	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx5byte, tx6byte}}
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 1,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Contains(t, rr.Body.String(), "TOB tx value is less than the current value!")
+
+	tobTxValue, err = backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+	fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
+	require.Equal(t, tobTxValue, big.NewInt(10))
+
+	tobtxs, err = backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, len(tobtxs))
+
+	firstTx = new(gethtypes.Transaction)
+	err = firstTx.UnmarshalBinary(tobtxs[0])
+
+	firstTxJson, err = firstTx.MarshalJSON()
+	require.NoError(t, err)
+	tx1Json, err = tx3.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, firstTxJson, tx1Json)
+
+	secondTx = new(gethtypes.Transaction)
+	err = secondTx.UnmarshalBinary(tobtxs[1])
+	secondTxJson, err = secondTx.MarshalJSON()
+	require.NoError(t, err)
+	tx2Json, err = tx4.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, secondTxJson, tx2Json)
+
+	// Test 3 : Past slot
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
 		TobTxs:     txs,
@@ -526,7 +676,7 @@ func TestSubmitTobTxs(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	require.Contains(t, rr.Body.String(), "Submitted TOB tx request for past slot!")
 
-	// Test 3 : Slot to far ahead
+	// Test 4 : Slot to far ahead
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
 		TobTxs:     txs,
@@ -543,13 +693,11 @@ func TestSubmitTobTxs(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	require.Contains(t, rr.Body.String(), "Slot's TOB bid not yet started!!")
 
-	// Test 4 : No txs are sent
+	// Test 5 : No txs are sent
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
-		TobTxs: boosttypes.Transactions{
-			Transactions: [][]byte{},
-		},
-		Slot: headSlot + 2,
+		TobTxs:     bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}},
+		Slot:       headSlot + 2,
 	}
 	fmt.Printf("Marshalling request to json!!")
 	jsonReq, err = req.MarshalJSON()

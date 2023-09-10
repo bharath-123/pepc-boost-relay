@@ -471,11 +471,10 @@ func TestSetTobTxs(t *testing.T) {
 
 	slot := uint64(123)
 	parentHash := "0x13e606c7b3d1faad7e83503ce3dedce4c6bb89b0c28ffb240d713c7b110b9747"
-	proposerPubkey := "0x6ae5932d1e248d987d51b58665b81848814202d7b23b343d20f2a167d12f07dcb01ca41c42fdd60b7fca9c4b90890792"
 
 	// Get the TOB txs
 	_, err := cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
-		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash, proposerPubkey)
+		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash)
 		require.NoError(t, err)
 		require.Equal(t, b, [][]byte{})
 		return nil
@@ -510,12 +509,12 @@ func TestSetTobTxs(t *testing.T) {
 	}
 
 	_, err = cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
-		return cache.SetTobTx(context.Background(), tx, slot, parentHash, proposerPubkey, txs.Transactions)
+		return cache.SetTobTx(context.Background(), tx, slot, parentHash, txs.Transactions)
 	})
 	require.NoError(t, err)
 
 	_, err = cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
-		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash, proposerPubkey)
+		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash)
 		require.NoError(t, err)
 		require.Equal(t, b, txs.Transactions)
 		return nil
@@ -527,20 +526,19 @@ func TestSetTobTxValue(t *testing.T) {
 
 	slot := uint64(123)
 	parentHash := "0x13e606c7b3d1faad7e83503ce3dedce4c6bb89b0c28ffb240d713c7b110b9747"
-	proposerPubkey := "0x6ae5932d1e248d987d51b58665b81848814202d7b23b343d20f2a167d12f07dcb01ca41c42fdd60b7fca9c4b90890792"
 
 	// Set a value
 	value := big.NewInt(123)
 	_, err := cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
-		v, err := cache.GetTobTxValue(context.Background(), tx, slot, parentHash, proposerPubkey)
+		v, err := cache.GetTobTxValue(context.Background(), tx, slot, parentHash)
 		require.NoError(t, err)
 		require.Equal(t, v, big.NewInt(0))
 
-		err = cache.SetTobTxValue(context.Background(), tx, value, slot, parentHash, proposerPubkey)
+		err = cache.SetTobTxValue(context.Background(), tx, value, slot, parentHash)
 		require.NoError(t, err)
 
 		// Get the value back
-		v, err = cache.GetTobTxValue(context.Background(), tx, slot, parentHash, proposerPubkey)
+		v, err = cache.GetTobTxValue(context.Background(), tx, slot, parentHash)
 		require.NoError(t, err)
 		require.Equal(t, v, big.NewInt(123))
 

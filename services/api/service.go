@@ -24,8 +24,10 @@ import (
 	builderCapella "github.com/attestantio/go-builder-client/api/capella"
 	v1 "github.com/attestantio/go-builder-client/api/v1"
 	"github.com/attestantio/go-eth2-client/api/v1/capella"
+	bellatrix2 "github.com/attestantio/go-eth2-client/spec/bellatrix"
 	capella2 "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/attestantio/go-eth2-client/util/bellatrix"
 	"github.com/buger/jsonparser"
 	common2 "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -80,11 +82,16 @@ var (
 	pathDataBuilderBidsReceived      = "/relay/v1/data/bidtraces/builder_blocks_received"
 	pathDataValidatorRegistration    = "/relay/v1/data/validator_registration"
 	pathDataGetCurrentTobTx          = "/relay/v1/data/current_tob_tx"
-	pathDataIsRelayerPepc            = "/relay/v1/builder/is_relayer_pepc"
+	// this is for the builders to know if they are interacting with a pepc relayer or not.
+	// this solution is so that builder can enable pepc relayer specific features like validator payout changes etc
+	pathDataIsRelayerPepc = "/relay/v1/builder/is_relayer_pepc"
 
 	// Internal API
 	pathInternalBuilderStatus     = "/internal/v1/builder/{pubkey:0x[a-fA-F0-9]+}"
 	pathInternalBuilderCollateral = "/internal/v1/builder/collateral/{pubkey:0x[a-fA-F0-9]+}"
+
+	// TEMP APIS BY BCHAIN99 FOR TESTING
+	pathGetHeadSlot = "/relay/v1/builder/head_slot"
 
 	// number of goroutines to save active validator
 	numValidatorRegProcessors = cli.GetEnvInt("NUM_VALIDATOR_REG_PROCESSORS", 10)
@@ -396,6 +403,8 @@ func (api *RelayAPI) getRouter() http.Handler {
 		r.HandleFunc(pathInternalBuilderStatus, api.handleInternalBuilderStatus).Methods(http.MethodGet, http.MethodPost, http.MethodPut)
 		r.HandleFunc(pathInternalBuilderCollateral, api.handleInternalBuilderCollateral).Methods(http.MethodPost, http.MethodPut)
 	}
+
+	r.HandleFunc(pathGetHeadSlot, api.handleGetHeadSlot).Methods(http.MethodGet)
 
 	mresp := common.MustB64Gunzip("H4sICAtOkWQAA2EudHh0AKWVPW+DMBCGd36Fe9fIi5Mt8uqqs4dIlZiCEqosKKhVO2Txj699GBtDcEl4JwTnh/t4dS7YWom2FcVaiETSDEmIC+pWLGRVgKrD3UY0iwnSj6THofQJDomiR13BnPgjvJDqNWX+OtzH7inWEGvr76GOCGtg3Kp7Ak+lus3zxLNtmXaMUncjcj1cwbOH3xBZtJCYG6/w+hdpB6ErpnqzFPZxO4FdXB3SAEgpscoDqWeULKmJA4qyfYFg0QV+p7hD8GGDd6C8+mElGDKab1CWeUQMVVvVDTJVj6nngHmNOmSoe6yH1BM3KZIKpuRaHKrOFd/3ksQwzdK+ejdM4VTzSDfjJsY1STeVTWb0T9JWZbJs8DvsNvwaddKdUy4gzVIzWWaWk3IF8D35kyUDf3FfKipwk/DYUee2nYyWQD0xEKDHeprzeXYwVmZD/lXt1OOg8EYhFfitsmQVcwmbUutpdt3PoqWdMyd2DYHKbgcmPlEYMxPjR6HhxOfuNG52xZr7TtzpygJJKNtWS14Uf0T6XSmzBwAA")
 	r.HandleFunc("/miladyz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK); w.Write(mresp) }).Methods(http.MethodGet) //nolint:errcheck
@@ -1759,6 +1768,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
+	log.Info("DEBUG: submit TOB Txs request decoded", "tobTxRequest", tobTxRequest)
 	slot := tobTxRequest.Slot
 	parentHash := tobTxRequest.ParentHash
 	if len(tobTxRequest.TobTxs.Transactions) == 0 {
@@ -1766,7 +1776,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.Respond(w, http.StatusBadRequest, "Empty TOB tx request sent!")
 		return
 	}
-
+	//
 	if slot < headSlot {
 		log.Error("TOB tx request for past slot!")
 		api.Respond(w, http.StatusBadRequest, "Submitted TOB tx request for past slot!")
@@ -1816,27 +1826,20 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 
 	tx := api.redis.NewTxPipeline()
 
-	api.proposerDutiesLock.RLock()
-	proposerDuty, ok := api.proposerDutiesMap[slot]
-	api.proposerDutiesLock.RUnlock()
-	if !ok || proposerDuty == nil {
-		log.Error("No validator found for the slot!")
-		api.Respond(w, http.StatusBadRequest, "No validator found for the slot!")
-		return
-	}
-	proposerPubKey := proposerDuty.Entry.Message.Pubkey.String()
-
 	tobTxValue := lastTx.Value()
 	log.Info("DEBUG: tobTxValue is ", tobTxValue)
-	log.Info("DEBUG: Writing TobTxValue to redis cache with key", slot, parentHash, proposerPubKey)
+	log.Info("DEBUG: Writing TobTxValue to redis cache with key", slot, parentHash)
 	// store it in a redis cache. The ROB block will pick it up and assemble it along with its own txs
-	currentTobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, slot, parentHash, proposerPubKey)
+	currentTobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, slot, parentHash)
 	if err != nil {
 		log.WithError(err).Warn("could not get current Tob Tx value")
 		api.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	log.Info("DEBUG: Wrote TobTxValue to redis cache with key", slot, parentHash, proposerPubKey)
+	log.Info("DEBUG: currentTobTxValue is ", currentTobTxValue)
+	log.Info("DEBUG: tobTxValue is ", tobTxValue)
+	log.Info("DEBUG: tobTxValue.Cmp(currentTobTxValue) is ", tobTxValue.Cmp(currentTobTxValue))
+	log.Info("DEBUG: Wrote TobTxValue to redis cache with key", slot, parentHash)
 
 	if currentTobTxValue.Cmp(tobTxValue) > 0 {
 		log.Error("TOB tx value is less than the current value!")
@@ -1845,19 +1848,27 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	}
 
 	// add the tob tx to the redis cache
-	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, proposerPubKey, tobTxRequest.TobTxs.Transactions)
+	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
 	if err != nil {
 		log.WithError(err).Warn("could not set Tob Tx")
 		api.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// set the tob tx value in the redis cache
-	err = api.redis.SetTobTxValue(context.Background(), tx, tobTxValue, slot, parentHash, proposerPubKey)
+	err = api.redis.SetTobTxValue(context.Background(), tx, tobTxValue, slot, parentHash)
 	if err != nil {
 		log.WithError(err).Warn("could not set Tob Tx Value")
 		api.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	currentTobTxValue, err = api.redis.GetTobTxValue(context.Background(), tx, slot, parentHash)
+	if err != nil {
+		log.WithError(err).Warn("could not get current Tob Tx value")
+		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	log.Info("DEBUG: currentTobTxValue before returning is ", currentTobTxValue)
 
 	api.Respond(w, http.StatusOK, "Tob Tx submitted successfully!")
 	return
@@ -2043,7 +2054,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 	// If so proceed with assembly.
 	// check if there is a TOB tx
 	log.Info("DEBUG: checking for tob txs")
-	tobTxs, err := api.redis.GetTobTx(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
+	tobTxs, err := api.redis.GetTobTx(context.Background(), tx, payload.Slot(), payload.ParentHash())
 	if err != nil {
 		log.WithError(err).Error("failed to get tob txs from redis")
 		api.RespondError(w, http.StatusInternalServerError, "failed to get tob txs from redis")
@@ -2053,7 +2064,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 
 	if len(tobTxs) > 0 {
 		log.Info("DEBUG: tob txs found")
-		tobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
+		tobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, payload.Slot(), payload.ParentHash())
 		if err != nil {
 			log.WithError(err).Error("failed to get tob tx value from redis")
 			api.RespondError(w, http.StatusInternalServerError, "failed to get tob tx value from redis")
@@ -2140,10 +2151,18 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 	payloadAttributes := api.payloadAttributes[payload.ParentHash()]
 	api.payloadAttributesLock.RUnlock()
 
+	tobTxsToSendToAssembler := bellatrix.ExecutionPayloadTransactions{
+		Transactions: []bellatrix2.Transaction{},
+	}
+
+	for _, tobTxByte := range tobTxs {
+		tobTxsToSendToAssembler.Transactions = append(tobTxsToSendToAssembler.Transactions, tobTxByte)
+	}
+
 	opts := blockAssemblyOptions{
 		log: log,
 		req: &common.BlockAssemblerRequest{
-			TobTxs:             tobTxs,
+			TobTxs:             tobTxsToSendToAssembler,
 			RobPayload:         payload,
 			RegisteredGasLimit: gasLimit,
 			PayloadAttributes: &common.PayloadAttributes{
@@ -2737,6 +2756,12 @@ func (api *RelayAPI) handleInternalBuilderStatus(w http.ResponseWriter, req *htt
 	}
 }
 
+func (api *RelayAPI) handleGetHeadSlot(w http.ResponseWriter, req *http.Request) {
+	headSlot := api.headSlot.Load()
+
+	api.RespondOK(w, headSlot)
+}
+
 func (api *RelayAPI) handleInternalBuilderCollateral(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	builderPubkey := vars["pubkey"]
@@ -2953,6 +2978,7 @@ func (api *RelayAPI) handleDataGetCurrentTobTx(w http.ResponseWriter, req *http.
 		api.RespondError(w, http.StatusBadRequest, "missing parent_hash argument")
 		return
 	}
+
 }
 
 func (api *RelayAPI) handleDataIsRelayerPepc(w http.ResponseWriter, req *http.Request) {

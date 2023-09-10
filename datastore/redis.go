@@ -23,7 +23,7 @@ import (
 var (
 	redisPrefix = "boost-relay"
 
-	expiryBidCache = 45 * time.Second
+	expiryBidCache = 1000 * time.Second
 
 	RedisConfigFieldPubkey         = "pubkey"
 	RedisStatsFieldLatestSlot      = "latest-slot"
@@ -165,12 +165,12 @@ func NewRedisCache(prefix, redisURI, readonlyURI string) (*RedisCache, error) {
 	}, nil
 }
 
-func (r *RedisCache) keyCacheGetTobTxs(slot uint64, parentHash, proposerPubKey string) string {
-	return fmt.Sprintf("%s:%d-%s-%s", r.prefixTobTobTx, slot, parentHash, proposerPubKey)
+func (r *RedisCache) keyCacheGetTobTxs(slot uint64, parentHash string) string {
+	return fmt.Sprintf("%s:%d-%s", r.prefixTobTobTx, slot, parentHash)
 }
 
-func (r *RedisCache) keyCacheGetTobTxsValue(slot uint64, parentHash, proposerPubKey string) string {
-	return fmt.Sprintf("%s:%d-%s-%s", r.prefixTopTobTxValue, slot, parentHash, proposerPubKey)
+func (r *RedisCache) keyCacheGetTobTxsValue(slot uint64, parentHash string) string {
+	return fmt.Sprintf("%s:%d-%s", r.prefixTopTobTxValue, slot, parentHash)
 }
 
 func (r *RedisCache) keyCacheGetHeaderResponse(slot uint64, parentHash, proposerPubkey string) string {
@@ -376,19 +376,21 @@ func (r *RedisCache) GetRelayConfig(field string) (string, error) {
 	return res, err
 }
 
-func (r *RedisCache) SetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string, proposerPubKey string, txs [][]byte) error {
-	key := r.keyCacheGetTobTxs(slot, parentHash, proposerPubKey)
+func (r *RedisCache) SetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string, txs [][]byte) error {
+	key := r.keyCacheGetTobTxs(slot, parentHash)
 	finalTxStrings := []string{}
 	for _, tx := range txs {
 		finalTxStrings = append(finalTxStrings, hex.EncodeToString(tx))
 	}
 	finalTxString := strings.Join(finalTxStrings, ",")
 
-	return tx.Set(ctx, key, finalTxString, expiryBidCache).Err()
+	_ = tx.Set(ctx, key, finalTxString, expiryBidCache).Err()
+	_, err := tx.Exec(ctx)
+	return err
 }
 
-func (r *RedisCache) GetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash, proposerPubKey string) ([][]byte, error) {
-	key := r.keyCacheGetTobTxs(slot, parentHash, proposerPubKey)
+func (r *RedisCache) GetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string) ([][]byte, error) {
+	key := r.keyCacheGetTobTxs(slot, parentHash)
 	resp := make([][]byte, 0)
 	c := tx.Get(ctx, key)
 	_, err := tx.Exec(ctx)
@@ -413,13 +415,15 @@ func (r *RedisCache) GetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint
 	return resp, err
 }
 
-func (r *RedisCache) SetTobTxValue(ctx context.Context, tx redis.Pipeliner, value *big.Int, slot uint64, parentHash, proposerPubKey string) (err error) {
-	key := r.keyCacheGetTobTxsValue(slot, parentHash, proposerPubKey)
-	return tx.Set(ctx, key, value.String(), expiryBidCache).Err()
+func (r *RedisCache) SetTobTxValue(ctx context.Context, tx redis.Pipeliner, value *big.Int, slot uint64, parentHash string) (err error) {
+	key := r.keyCacheGetTobTxsValue(slot, parentHash)
+	_ = tx.Set(ctx, key, value.String(), expiryBidCache).Err()
+	_, err = tx.Exec(ctx)
+	return err
 }
 
-func (r *RedisCache) GetTobTxValue(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash, proposerPubKey string) (tobTxValue *big.Int, err error) {
-	keyTobTxValue := r.keyCacheGetTobTxsValue(slot, parentHash, proposerPubKey)
+func (r *RedisCache) GetTobTxValue(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string) (tobTxValue *big.Int, err error) {
+	keyTobTxValue := r.keyCacheGetTobTxsValue(slot, parentHash)
 	c := tx.Get(ctx, keyTobTxValue)
 	_, err = tx.Exec(ctx)
 	if errors.Is(err, redis.Nil) {

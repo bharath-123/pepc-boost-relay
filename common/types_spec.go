@@ -261,14 +261,32 @@ type PayloadAttributes struct {
 }
 
 type BlockAssemblerRequest struct {
-	TobTxs             [][]byte                   `json:"tob_txs"`
+	TobTxs             utilbellatrix.ExecutionPayloadTransactions `json:"tob_txs"`
+	RobPayload         *BuilderSubmitBlockRequest                 `json:"rob_payload"`
+	RegisteredGasLimit uint64                                     `json:"registered_gas_limit,string"`
+	PayloadAttributes  *PayloadAttributes                         `json:"payload_attributes"`
+}
+
+type IntermediateBlockAssemblerRequest struct {
+	TobTxs             []byte                     `json:"tob_txs"`
 	RobPayload         *BuilderSubmitBlockRequest `json:"rob_payload"`
 	RegisteredGasLimit uint64                     `json:"registered_gas_limit,string"`
 	PayloadAttributes  *PayloadAttributes         `json:"payload_attributes"`
 }
 
 func (r *BlockAssemblerRequest) MarshalJSON() ([]byte, error) {
-	return r.MarshalJSON()
+	sszedTobTxs, err := r.TobTxs.MarshalSSZ()
+	if err != nil {
+		return nil, err
+	}
+	intermediateStruct := IntermediateBlockAssemblerRequest{
+		TobTxs:             sszedTobTxs,
+		RobPayload:         r.RobPayload,
+		RegisteredGasLimit: r.RegisteredGasLimit,
+		PayloadAttributes:  r.PayloadAttributes,
+	}
+
+	return json.Marshal(intermediateStruct)
 }
 
 func (r *BlockAssemblerRequest) UnmarshalJSON(data []byte) error {

@@ -16,6 +16,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	consensuscapella "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	utilbellatrix "github.com/attestantio/go-eth2-client/util/bellatrix"
 	"github.com/ethereum/go-ethereum/core/types"
 	boostTypes "github.com/flashbots/go-boost-utils/types"
 )
@@ -470,7 +471,7 @@ func DecodeTransactions(enc [][]byte) ([]*types.Transaction, error) {
 }
 
 type TobTxsSubmitRequest struct {
-	TobTxs     boostTypes.Transactions
+	TobTxs     utilbellatrix.ExecutionPayloadTransactions
 	Slot       uint64
 	ParentHash string
 }
