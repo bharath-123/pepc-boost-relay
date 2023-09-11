@@ -659,7 +659,7 @@ func TestSubmitTobTxs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, secondTxJson, tx2Json)
 
-	// Test 3 : Past slot
+	// Test 4: Past slot
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
 		TobTxs:     txs,
@@ -693,7 +693,7 @@ func TestSubmitTobTxs(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	require.Contains(t, rr.Body.String(), "Slot's TOB bid not yet started!!")
 
-	// Test 5 : No txs are sent
+	// Test 5: No txs are sent
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
 		TobTxs:     bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}},
