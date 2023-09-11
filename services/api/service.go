@@ -1818,6 +1818,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 
 	lastTx := txs[len(txs)-1]
 
+	// TODO - simulate the tx to check for tx validity
 	err = api.checkTobTxsStateInterference(txs)
 	if err != nil {
 		log.WithError(err).Warn("could not validate tob txs")
@@ -1846,6 +1847,10 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.Respond(w, http.StatusBadRequest, "TOB tx value is less than the current value!")
 		return
 	}
+
+	// TODO - bchain - simulate the txs on the parent block. If it fails, reject the txs.
+	// This is already solved and should be straightforward to implement. its basically simulation
+	// with some additional checks
 
 	// add the tob tx to the redis cache
 	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
@@ -2147,10 +2152,6 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		log.Info("DEBUG: Done saving the block builder entry to the database")
 	}()
 
-	api.payloadAttributesLock.RLock()
-	payloadAttributes := api.payloadAttributes[payload.ParentHash()]
-	api.payloadAttributesLock.RUnlock()
-
 	tobTxsToSendToAssembler := bellatrix.ExecutionPayloadTransactions{
 		Transactions: []bellatrix2.Transaction{},
 	}
@@ -2165,12 +2166,6 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 			TobTxs:             tobTxsToSendToAssembler,
 			RobPayload:         payload,
 			RegisteredGasLimit: gasLimit,
-			PayloadAttributes: &common.PayloadAttributes{
-				Timestamp:             payloadAttributes.payloadAttributes.Timestamp,
-				PrevRandao:            payloadAttributes.payloadAttributes.PrevRandao,
-				SuggestedFeeRecipient: payloadAttributes.payloadAttributes.SuggestedFeeRecipient,
-				Withdrawals:           payloadAttributes.payloadAttributes.Withdrawals,
-			},
 		},
 	}
 
@@ -2978,6 +2973,8 @@ func (api *RelayAPI) handleDataGetCurrentTobTx(w http.ResponseWriter, req *http.
 		api.RespondError(w, http.StatusBadRequest, "missing parent_hash argument")
 		return
 	}
+
+	// TODO - bchain - finish impl of this, should be pretty straightforward
 
 }
 
