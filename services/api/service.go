@@ -1675,6 +1675,7 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction) erro
 	if firstTx.To() == nil {
 		return fmt.Errorf("contract creation cannot be a TOB tx")
 	}
+	// This address is from the kurtosis local devnet. Need to expand state interference checks
 	if *firstTx.To() != common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e") {
 		return fmt.Errorf("TOB tx can only be sent to uniswap v2 router")
 	}
