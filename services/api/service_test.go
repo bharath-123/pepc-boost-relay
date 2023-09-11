@@ -659,6 +659,119 @@ func TestSubmitTobTxs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, secondTxJson, tx2Json)
 
+	// Test 3: No payout tx
+	req = new(common.TobTxsSubmitRequest)
+	addr1 = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	tx7 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    3,
+		GasPrice: big.NewInt(3),
+		Gas:      3,
+		To:       &addr1,
+		Value:    big.NewInt(3),
+		Data:     []byte("tx6"),
+	})
+	tx7byte, err := tx7.MarshalBinary()
+	require.NoError(t, err)
+	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx7byte}}
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 1,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Contains(t, rr.Body.String(), "We require a payment tx along with the TOB txs!")
+
+	// Test 3: Payout tx is to the wrong address
+	req = new(common.TobTxsSubmitRequest)
+	addr1 = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	tx8 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    3,
+		GasPrice: big.NewInt(3),
+		Gas:      3,
+		To:       &addr1,
+		Value:    big.NewInt(3),
+		Data:     []byte("tx6"),
+	})
+	tx9 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    4,
+		GasPrice: big.NewInt(5),
+		Gas:      12,
+		To:       &addr1,
+		Value:    big.NewInt(5),
+		Data:     []byte(""),
+	})
+	tx8byte, err := tx8.MarshalBinary()
+	require.NoError(t, err)
+	tx9byte, err := tx9.MarshalBinary()
+	require.NoError(t, err)
+	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx8byte, tx9byte}}
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 1,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Contains(t, rr.Body.String(), "We require a payment tx to the relayer along with the TOB txs!")
+
+	// Test 3: Fail state interference checks
+	req = new(common.TobTxsSubmitRequest)
+	addr1 = common2.HexToAddress("0xB2D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	tx10 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    3,
+		GasPrice: big.NewInt(3),
+		Gas:      3,
+		To:       &addr1,
+		Value:    big.NewInt(3),
+		Data:     []byte("tx6"),
+	})
+	tx11 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    4,
+		GasPrice: big.NewInt(5),
+		Gas:      12,
+		To:       &backend.relay.relayerPayoutAddress,
+		Value:    big.NewInt(5),
+		Data:     []byte(""),
+	})
+	tx10byte, err := tx10.MarshalBinary()
+	require.NoError(t, err)
+	tx11byte, err := tx11.MarshalBinary()
+	require.NoError(t, err)
+	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx10byte, tx11byte}}
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 1,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Contains(t, rr.Body.String(), "TOB tx can only be sent to uniswap v2 router")
+
 	// Test 4: Past slot
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,

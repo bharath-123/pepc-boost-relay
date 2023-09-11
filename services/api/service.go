@@ -1797,12 +1797,12 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	txs, err := common.DecodeTransactions(transactionBytes)
 	if err != nil {
 		log.WithError(err).Warn("could not decode transactions")
-		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(txs) == 1 {
 		log.Error("We require a payment tx along with the TOB txs!")
-		api.Respond(w, http.StatusBadRequest, "No payment tx included!")
+		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
 		return
 	}
 	log.Info("DEBUG: decoded txs are ", txs)
@@ -1812,7 +1812,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	err = api.checkTxAndSenderValidity(txs, log)
 	if err != nil {
 		log.WithError(err).Warn("error validating the txs")
-		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1866,14 +1866,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	currentTobTxValue, err = api.redis.GetTobTxValue(context.Background(), tx, slot, parentHash)
-	if err != nil {
-		log.WithError(err).Warn("could not get current Tob Tx value")
-		api.RespondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	log.Info("DEBUG: currentTobTxValue before returning is ", currentTobTxValue)
 
 	api.Respond(w, http.StatusOK, "Tob Tx submitted successfully!")
 	return
