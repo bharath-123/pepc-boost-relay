@@ -89,19 +89,14 @@ type RedisCache struct {
 	prefixTobTobTx      string
 
 	// prefixes (keys generated with a function)
-	prefixGetHeaderResponse string
-
-	prefixExecPayloadCapella string
-
-	prefixBidTrace string
-
+	prefixGetHeaderResponse      string
+	prefixExecPayloadCapella     string
+	prefixBidTrace               string
 	prefixBlockBuilderLatestBids string // latest bid for a given slot
 
 	prefixBlockBuilderLatestBidsValue string // value of latest bid for a given slot
-
-	prefixBlockBuilderLatestBidsTime string // when the request was received, to avoid older requests overwriting newer ones after a slot validation
-
-	prefixTopBidValue string
+	prefixBlockBuilderLatestBidsTime  string // when the request was received, to avoid older requests overwriting newer ones after a slot validation
+	prefixTopBidValue                 string
 
 	prefixFloorBid      string
 	prefixFloorBidValue string
@@ -138,18 +133,14 @@ func NewRedisCache(prefix, redisURI, readonlyURI string) (*RedisCache, error) {
 		prefixTobTobTx:      fmt.Sprintf("%s/%s:cache-tobtobtx", redisPrefix, prefix),
 		prefixTopTobTxValue: fmt.Sprintf("%s/%s:cache-toptobtx-value", redisPrefix, prefix),
 
-		prefixGetHeaderResponse: fmt.Sprintf("%s/%s:cache-gethead-response", redisPrefix, prefix),
-
+		prefixGetHeaderResponse:  fmt.Sprintf("%s/%s:cache-gethead-response", redisPrefix, prefix),
 		prefixExecPayloadCapella: fmt.Sprintf("%s/%s:cache-execpayload-capella", redisPrefix, prefix),
 		prefixBidTrace:           fmt.Sprintf("%s/%s:cache-bid-trace", redisPrefix, prefix),
 
-		prefixBlockBuilderLatestBids: fmt.Sprintf("%s/%s:block-builder-latest-bid", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
-
+		prefixBlockBuilderLatestBids:      fmt.Sprintf("%s/%s:block-builder-latest-bid", redisPrefix, prefix),       // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
 		prefixBlockBuilderLatestBidsValue: fmt.Sprintf("%s/%s:block-builder-latest-bid-value", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
-
-		prefixBlockBuilderLatestBidsTime: fmt.Sprintf("%s/%s:block-builder-latest-bid-time", redisPrefix, prefix), // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
-
-		prefixTopBidValue: fmt.Sprintf("%s/%s:top-bid-value", redisPrefix, prefix), // prefix:slot_parentHash_proposerPubkey
+		prefixBlockBuilderLatestBidsTime:  fmt.Sprintf("%s/%s:block-builder-latest-bid-time", redisPrefix, prefix),  // hashmap for slot+parentHash+proposerPubkey with builderPubkey as field
+		prefixTopBidValue:                 fmt.Sprintf("%s/%s:top-bid-value", redisPrefix, prefix),                  // prefix:slot_parentHash_proposerPubkey
 
 		prefixFloorBid:      fmt.Sprintf("%s/%s:bid-floor", redisPrefix, prefix),       // prefix:slot_parentHash_proposerPubkey
 		prefixFloorBidValue: fmt.Sprintf("%s/%s:bid-floor-value", redisPrefix, prefix), // prefix:slot_parentHash_proposerPubkey
