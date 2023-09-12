@@ -384,8 +384,11 @@ func (r *RedisCache) SetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint
 	}
 	finalTxString := strings.Join(finalTxStrings, ",")
 
-	_ = tx.Set(ctx, key, finalTxString, expiryBidCache).Err()
-	_, err := tx.Exec(ctx)
+	err := tx.Set(ctx, key, finalTxString, expiryBidCache).Err()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx)
 	return err
 }
 
@@ -417,7 +420,10 @@ func (r *RedisCache) GetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint
 
 func (r *RedisCache) SetTobTxValue(ctx context.Context, tx redis.Pipeliner, value *big.Int, slot uint64, parentHash string) (err error) {
 	key := r.keyCacheGetTobTxsValue(slot, parentHash)
-	_ = tx.Set(ctx, key, value.String(), expiryBidCache).Err()
+	err = tx.Set(ctx, key, value.String(), expiryBidCache).Err()
+	if err != nil {
+		return err
+	}
 	_, err = tx.Exec(ctx)
 	return err
 }
