@@ -594,18 +594,18 @@ func (api *RelayAPI) assembleBlock(ctx context.Context, opts blockAssemblyOption
 			// Operators chooses to ignore certain validation errors
 			ignoreError := validationErr.Error() == ErrBlockAlreadyKnown || validationErr.Error() == ErrBlockRequiresReorg || strings.Contains(validationErr.Error(), ErrMissingTrieNode)
 			if ignoreError {
-				log.WithError(validationErr).Warn("block validation failed with ignorable error")
+				log.WithError(validationErr).Warn("block assembly failed with ignorable error")
 				return nil, nil, nil
 			}
 		}
-		log.WithError(validationErr).Warn("block validation failed")
+		log.WithError(validationErr).Warn("block assembly failed")
 		return nil, validationErr, nil
 	}
 	if requestErr != nil {
-		log.WithError(requestErr).Warn("block validation failed: request error")
+		log.WithError(requestErr).Warn("block assembly failed: request error")
 		return nil, requestErr, nil
 	}
-	log.Info("block validation successful")
+	log.Info("block assembly successful")
 	return res, nil, nil
 }
 
@@ -2132,12 +2132,14 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		},
 	}
 
+	log.Info("DEBUG: Block assembly request is ", "req", opts.req)
 	timeBeforeAssembly := time.Now().UTC()
 
 	log = log.WithFields(logrus.Fields{
 		"timestampBeforeAssembly": timeBeforeAssembly.UTC().UnixMilli(),
 	})
 
+	log.Info("DEBUG: Assembling block now!")
 	assembledPayload, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
 	assemblyResultC <- &blockAssemblyResult{
 		assembledPayload: assembledPayload,
