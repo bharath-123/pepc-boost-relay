@@ -415,7 +415,185 @@ func TestBuilderSubmitBlockSSZ(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestSubmitTobTxs(t *testing.T) {
+func TestSubmitTobTxsOverrideTxsWithHigherValue(t *testing.T) {
+	path := "/relay/v1/builder/tob_txs"
+	backend := newTestBackend(t, 1)
+
+	headSlot := uint64(32)
+	submissionSlot := headSlot + 1
+	//submissionTimestamp := 1606824419
+
+	addr1 := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	// Payload attributes
+	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+	feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
+	require.NoError(t, err)
+	withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
+	require.NoError(t, err)
+	prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+	proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+	require.NoError(t, err)
+	proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
+
+	// Setup the test relay backend
+	backend.relay.headSlot.Store(headSlot)
+	backend.relay.capellaEpoch = 1
+	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+		Slot: headSlot,
+		Entry: &types.SignedValidatorRegistration{
+			Message: &types.RegisterValidatorRequestMessage{
+				Pubkey:       boosttypes.PublicKey(proposerPubkey),
+				FeeRecipient: feeRec,
+			},
+		},
+	}
+	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+		slot:       submissionSlot,
+		parentHash: parentHash,
+		payloadAttributes: beaconclient.PayloadAttributes{
+			PrevRandao: prevRandao,
+		},
+		withdrawalsRoot: phase0.Root(withdrawalsRoot),
+	}
+
+	// Test 1 : Happy path
+	req := new(common.TobTxsSubmitRequest)
+
+	tx1 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    1,
+		GasPrice: big.NewInt(1),
+		Gas:      1,
+		To:       &addr1,
+		Value:    big.NewInt(1),
+		Data:     []byte("tx1"),
+	})
+	tx2 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    2,
+		GasPrice: big.NewInt(2),
+		Gas:      2,
+		To:       &backend.relay.relayerPayoutAddress,
+		Value:    big.NewInt(2),
+		Data:     []byte(""),
+	})
+	tx1byte, err := tx1.MarshalBinary()
+	require.NoError(t, err)
+	tx2byte, err := tx2.MarshalBinary()
+	require.NoError(t, err)
+	txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx1byte, tx2byte}}
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 1,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err := req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr := backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+	fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
+	require.Equal(t, tobTxValue, big.NewInt(2))
+
+	tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, len(tobtxs))
+
+	firstTx := new(gethtypes.Transaction)
+	err = firstTx.UnmarshalBinary(tobtxs[0])
+
+	firstTxJson, err := firstTx.MarshalJSON()
+	require.NoError(t, err)
+	tx1Json, err := tx1.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, firstTxJson, tx1Json)
+
+	secondTx := new(gethtypes.Transaction)
+	err = secondTx.UnmarshalBinary(tobtxs[1])
+	secondTxJson, err := secondTx.MarshalJSON()
+	require.NoError(t, err)
+	tx2Json, err := tx2.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, secondTxJson, tx2Json)
+
+	// Test 2: Try adding txs with higher value
+	req = new(common.TobTxsSubmitRequest)
+	addr1 = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	tx3 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    3,
+		GasPrice: big.NewInt(3),
+		Gas:      3,
+		To:       &addr1,
+		Value:    big.NewInt(3),
+		Data:     []byte("tx3"),
+	})
+	tx4 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    4,
+		GasPrice: big.NewInt(5),
+		Gas:      12,
+		To:       &backend.relay.relayerPayoutAddress,
+		Value:    big.NewInt(10),
+		Data:     []byte(""),
+	})
+	tx3byte, err := tx3.MarshalBinary()
+	require.NoError(t, err)
+	tx4byte, err := tx4.MarshalBinary()
+	require.NoError(t, err)
+	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx3byte, tx4byte}}
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 1,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	tobTxValue, err = backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+	fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
+	require.Equal(t, tobTxValue, big.NewInt(10))
+
+	tobtxs, err = backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, len(tobtxs))
+
+	firstTx = new(gethtypes.Transaction)
+	err = firstTx.UnmarshalBinary(tobtxs[0])
+
+	firstTxJson, err = firstTx.MarshalJSON()
+	require.NoError(t, err)
+	tx1Json, err = tx3.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, firstTxJson, tx1Json)
+
+	secondTx = new(gethtypes.Transaction)
+	err = secondTx.UnmarshalBinary(tobtxs[1])
+	secondTxJson, err = secondTx.MarshalJSON()
+	require.NoError(t, err)
+	tx2Json, err = tx4.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, secondTxJson, tx2Json)
+}
+
+func TestSubmitTobTxsLowerValueRequests(t *testing.T) {
 	path := "/relay/v1/builder/tob_txs"
 	backend := newTestBackend(t, 1)
 
@@ -456,7 +634,7 @@ func TestSubmitTobTxs(t *testing.T) {
 		},
 		withdrawalsRoot: phase0.Root(withdrawalsRoot),
 	}
-
+	
 	// Test 1 : Happy path
 	req := new(common.TobTxsSubmitRequest)
 	addr1 := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
@@ -590,78 +768,53 @@ func TestSubmitTobTxs(t *testing.T) {
 	tx2Json, err = tx4.MarshalJSON()
 	require.NoError(t, err)
 	require.Equal(t, secondTxJson, tx2Json)
+}
 
-	// Test 3: Try adding txs with lower value
-	req = new(common.TobTxsSubmitRequest)
-	addr1 = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+func TestSubmitTobTxsNoPayout(t *testing.T) {
+	path := "/relay/v1/builder/tob_txs"
+	backend := newTestBackend(t, 1)
 
-	tx5 := gethtypes.NewTx(&gethtypes.LegacyTx{
-		Nonce:    3,
-		GasPrice: big.NewInt(3),
-		Gas:      3,
-		To:       &addr1,
-		Value:    big.NewInt(3),
-		Data:     []byte("tx6"),
-	})
-	tx6 := gethtypes.NewTx(&gethtypes.LegacyTx{
-		Nonce:    4,
-		GasPrice: big.NewInt(5),
-		Gas:      12,
-		To:       &backend.relay.relayerPayoutAddress,
-		Value:    big.NewInt(5),
-		Data:     []byte(""),
-	})
-	tx5byte, err := tx5.MarshalBinary()
+	headSlot := uint64(32)
+	submissionSlot := headSlot + 1
+	//submissionTimestamp := 1606824419
+
+	// Payload attributes
+	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+	feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
 	require.NoError(t, err)
-	tx6byte, err := tx6.MarshalBinary()
+	withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
 	require.NoError(t, err)
-	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx5byte, tx6byte}}
-	req = &common.TobTxsSubmitRequest{
-		ParentHash: parentHash,
-		TobTxs:     txs,
-		Slot:       headSlot + 1,
+	prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+	proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+	require.NoError(t, err)
+	proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
+
+	// Setup the test relay backend
+	backend.relay.headSlot.Store(headSlot)
+	backend.relay.capellaEpoch = 1
+	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+		Slot: headSlot,
+		Entry: &types.SignedValidatorRegistration{
+			Message: &types.RegisterValidatorRequestMessage{
+				Pubkey:       boosttypes.PublicKey(proposerPubkey),
+				FeeRecipient: feeRec,
+			},
+		},
 	}
-	fmt.Printf("Marshalling request to json!!")
-	jsonReq, err = req.MarshalJSON()
-	require.NoError(t, err)
-	fmt.Printf("Unmarshalling request from json!!")
-
-	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
-		"Content-Type": "application/json",
-	})
-	require.Equal(t, http.StatusBadRequest, rr.Code)
-	require.Contains(t, rr.Body.String(), "TOB tx value is less than the current value!")
-
-	tobTxValue, err = backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
-	require.NoError(t, err)
-	fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
-	require.Equal(t, tobTxValue, big.NewInt(10))
-
-	tobtxs, err = backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
-	require.NoError(t, err)
-
-	require.Equal(t, 2, len(tobtxs))
-
-	firstTx = new(gethtypes.Transaction)
-	err = firstTx.UnmarshalBinary(tobtxs[0])
-
-	firstTxJson, err = firstTx.MarshalJSON()
-	require.NoError(t, err)
-	tx1Json, err = tx3.MarshalJSON()
-	require.NoError(t, err)
-	require.Equal(t, firstTxJson, tx1Json)
-
-	secondTx = new(gethtypes.Transaction)
-	err = secondTx.UnmarshalBinary(tobtxs[1])
-	secondTxJson, err = secondTx.MarshalJSON()
-	require.NoError(t, err)
-	tx2Json, err = tx4.MarshalJSON()
-	require.NoError(t, err)
-	require.Equal(t, secondTxJson, tx2Json)
+	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+		slot:       submissionSlot,
+		parentHash: parentHash,
+		payloadAttributes: beaconclient.PayloadAttributes{
+			PrevRandao: prevRandao,
+		},
+		withdrawalsRoot: phase0.Root(withdrawalsRoot),
+	}
 
 	// Test 3: No payout tx
-	req = new(common.TobTxsSubmitRequest)
-	addr1 = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+	req := new(common.TobTxsSubmitRequest)
+	addr1 := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
 
 	tx7 := gethtypes.NewTx(&gethtypes.LegacyTx{
 		Nonce:    3,
@@ -673,26 +826,69 @@ func TestSubmitTobTxs(t *testing.T) {
 	})
 	tx7byte, err := tx7.MarshalBinary()
 	require.NoError(t, err)
-	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx7byte}}
+	txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx7byte}}
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
 		TobTxs:     txs,
 		Slot:       headSlot + 1,
 	}
 	fmt.Printf("Marshalling request to json!!")
-	jsonReq, err = req.MarshalJSON()
+	jsonReq, err := req.MarshalJSON()
 	require.NoError(t, err)
 	fmt.Printf("Unmarshalling request from json!!")
 
-	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+	rr := backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
 		"Content-Type": "application/json",
 	})
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	require.Contains(t, rr.Body.String(), "We require a payment tx along with the TOB txs!")
+}
+
+func TestSubmitTobTxsPayoutToWrongAddress(t *testing.T) {
+	path := "/relay/v1/builder/tob_txs"
+	backend := newTestBackend(t, 1)
+
+	headSlot := uint64(32)
+	submissionSlot := headSlot + 1
+	//submissionTimestamp := 1606824419
+
+	// Payload attributes
+	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+	feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
+	require.NoError(t, err)
+	withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
+	require.NoError(t, err)
+	prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+	proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+	require.NoError(t, err)
+	proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
+
+	// Setup the test relay backend
+	backend.relay.headSlot.Store(headSlot)
+	backend.relay.capellaEpoch = 1
+	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+		Slot: headSlot,
+		Entry: &types.SignedValidatorRegistration{
+			Message: &types.RegisterValidatorRequestMessage{
+				Pubkey:       boosttypes.PublicKey(proposerPubkey),
+				FeeRecipient: feeRec,
+			},
+		},
+	}
+	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+		slot:       submissionSlot,
+		parentHash: parentHash,
+		payloadAttributes: beaconclient.PayloadAttributes{
+			PrevRandao: prevRandao,
+		},
+		withdrawalsRoot: phase0.Root(withdrawalsRoot),
+	}
 
 	// Test 3: Payout tx is to the wrong address
-	req = new(common.TobTxsSubmitRequest)
-	addr1 = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+	req := new(common.TobTxsSubmitRequest)
+	addr1 := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
 
 	tx8 := gethtypes.NewTx(&gethtypes.LegacyTx{
 		Nonce:    3,
@@ -714,26 +910,70 @@ func TestSubmitTobTxs(t *testing.T) {
 	require.NoError(t, err)
 	tx9byte, err := tx9.MarshalBinary()
 	require.NoError(t, err)
-	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx8byte, tx9byte}}
+	txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx8byte, tx9byte}}
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
 		TobTxs:     txs,
 		Slot:       headSlot + 1,
 	}
 	fmt.Printf("Marshalling request to json!!")
-	jsonReq, err = req.MarshalJSON()
+	jsonReq, err := req.MarshalJSON()
 	require.NoError(t, err)
 	fmt.Printf("Unmarshalling request from json!!")
 
-	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+	rr := backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
 		"Content-Type": "application/json",
 	})
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	require.Contains(t, rr.Body.String(), "We require a payment tx to the relayer along with the TOB txs!")
 
+}
+
+func TestSubmitTobTxsStateInterference(t *testing.T) {
+	path := "/relay/v1/builder/tob_txs"
+	backend := newTestBackend(t, 1)
+
+	headSlot := uint64(32)
+	submissionSlot := headSlot + 1
+	//submissionTimestamp := 1606824419
+
+	// Payload attributes
+	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+	feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
+	require.NoError(t, err)
+	withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
+	require.NoError(t, err)
+	prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+	proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+	require.NoError(t, err)
+	proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
+
+	// Setup the test relay backend
+	backend.relay.headSlot.Store(headSlot)
+	backend.relay.capellaEpoch = 1
+	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+		Slot: headSlot,
+		Entry: &types.SignedValidatorRegistration{
+			Message: &types.RegisterValidatorRequestMessage{
+				Pubkey:       boosttypes.PublicKey(proposerPubkey),
+				FeeRecipient: feeRec,
+			},
+		},
+	}
+	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+		slot:       submissionSlot,
+		parentHash: parentHash,
+		payloadAttributes: beaconclient.PayloadAttributes{
+			PrevRandao: prevRandao,
+		},
+		withdrawalsRoot: phase0.Root(withdrawalsRoot),
+	}
+
 	// Test 3: Fail state interference checks
-	req = new(common.TobTxsSubmitRequest)
-	addr1 = common2.HexToAddress("0xB2D7a3554F221B34f49d7d3C61375E603aFb699e")
+	req := new(common.TobTxsSubmitRequest)
+	addr1 := common2.HexToAddress("0xB2D7a3554F221B34f49d7d3C61375E603aFb699e")
 
 	tx10 := gethtypes.NewTx(&gethtypes.LegacyTx{
 		Nonce:    3,
@@ -755,52 +995,102 @@ func TestSubmitTobTxs(t *testing.T) {
 	require.NoError(t, err)
 	tx11byte, err := tx11.MarshalBinary()
 	require.NoError(t, err)
-	txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx10byte, tx11byte}}
+	txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx10byte, tx11byte}}
 	req = &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
 		TobTxs:     txs,
 		Slot:       headSlot + 1,
 	}
 	fmt.Printf("Marshalling request to json!!")
-	jsonReq, err = req.MarshalJSON()
+	jsonReq, err := req.MarshalJSON()
 	require.NoError(t, err)
 	fmt.Printf("Unmarshalling request from json!!")
 
-	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+	rr := backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
 		"Content-Type": "application/json",
 	})
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	require.Contains(t, rr.Body.String(), "TOB tx can only be sent to uniswap v2 router")
 
-	// Test 4: Past slot
-	req = &common.TobTxsSubmitRequest{
-		ParentHash: parentHash,
-		TobTxs:     txs,
-		Slot:       headSlot - 2,
-	}
-	fmt.Printf("Marshalling request to json!!")
-	jsonReq, err = req.MarshalJSON()
-	require.NoError(t, err)
-	fmt.Printf("Unmarshalling request from json!!")
+}
 
-	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
-		"Content-Type": "application/json",
-	})
-	require.Equal(t, http.StatusBadRequest, rr.Code)
-	require.Contains(t, rr.Body.String(), "Submitted TOB tx request for past slot!")
+func TestSubmitTobTxsCheckSlots(t *testing.T) {
+	path := "/relay/v1/builder/tob_txs"
+	backend := newTestBackend(t, 1)
+
+	headSlot := uint64(32)
+	submissionSlot := headSlot + 1
+	//submissionTimestamp := 1606824419
+
+	// Payload attributes
+	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+	feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
+	require.NoError(t, err)
+	withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
+	require.NoError(t, err)
+	prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+	proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+	require.NoError(t, err)
+	proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
+
+	// Setup the test relay backend
+	backend.relay.headSlot.Store(headSlot)
+	backend.relay.capellaEpoch = 1
+	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+		Slot: headSlot,
+		Entry: &types.SignedValidatorRegistration{
+			Message: &types.RegisterValidatorRequestMessage{
+				Pubkey:       boosttypes.PublicKey(proposerPubkey),
+				FeeRecipient: feeRec,
+			},
+		},
+	}
+	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+		slot:       submissionSlot,
+		parentHash: parentHash,
+		payloadAttributes: beaconclient.PayloadAttributes{
+			PrevRandao: prevRandao,
+		},
+		withdrawalsRoot: phase0.Root(withdrawalsRoot),
+	}
 
 	// Test 4 : Slot to far ahead
-	req = &common.TobTxsSubmitRequest{
+	addr1 := common2.HexToAddress("0xB2D7a3554F221B34f49d7d3C61375E603aFb699e")
+	tx10 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    3,
+		GasPrice: big.NewInt(3),
+		Gas:      3,
+		To:       &addr1,
+		Value:    big.NewInt(3),
+		Data:     []byte("tx6"),
+	})
+	tx11 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    4,
+		GasPrice: big.NewInt(5),
+		Gas:      12,
+		To:       &backend.relay.relayerPayoutAddress,
+		Value:    big.NewInt(5),
+		Data:     []byte(""),
+	})
+	tx10byte, err := tx10.MarshalBinary()
+	require.NoError(t, err)
+	tx11byte, err := tx11.MarshalBinary()
+	require.NoError(t, err)
+	txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx10byte, tx11byte}}
+
+	req := &common.TobTxsSubmitRequest{
 		ParentHash: parentHash,
 		TobTxs:     txs,
 		Slot:       headSlot + 2,
 	}
 	fmt.Printf("Marshalling request to json!!")
-	jsonReq, err = req.MarshalJSON()
+	jsonReq, err := req.MarshalJSON()
 	require.NoError(t, err)
 	fmt.Printf("Unmarshalling request from json!!")
 
-	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+	rr := backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
 		"Content-Type": "application/json",
 	})
 	require.Equal(t, http.StatusBadRequest, rr.Code)
@@ -822,6 +1112,133 @@ func TestSubmitTobTxs(t *testing.T) {
 	})
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	require.Contains(t, rr.Body.String(), "Empty TOB tx request sent")
+}
+
+func TestSubmitTobTxsHappyPath(t *testing.T) {
+	path := "/relay/v1/builder/tob_txs"
+	backend := newTestBackend(t, 1)
+
+	headSlot := uint64(32)
+	submissionSlot := headSlot + 1
+	//submissionTimestamp := 1606824419
+
+	// Payload attributes
+	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+	feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
+	require.NoError(t, err)
+	withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
+	require.NoError(t, err)
+	prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+	proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+	require.NoError(t, err)
+	proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
+
+	// Setup the test relay backend
+	backend.relay.headSlot.Store(headSlot)
+	backend.relay.capellaEpoch = 1
+	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+		Slot: headSlot,
+		Entry: &types.SignedValidatorRegistration{
+			Message: &types.RegisterValidatorRequestMessage{
+				Pubkey:       boosttypes.PublicKey(proposerPubkey),
+				FeeRecipient: feeRec,
+			},
+		},
+	}
+	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+		slot:       submissionSlot,
+		parentHash: parentHash,
+		payloadAttributes: beaconclient.PayloadAttributes{
+			PrevRandao: prevRandao,
+		},
+		withdrawalsRoot: phase0.Root(withdrawalsRoot),
+	}
+
+	// Test 1: Try adding txs with higher value
+	req := new(common.TobTxsSubmitRequest)
+	addr1 := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	tx3 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    3,
+		GasPrice: big.NewInt(3),
+		Gas:      3,
+		To:       &addr1,
+		Value:    big.NewInt(3),
+		Data:     []byte("tx3"),
+	})
+	tx4 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    4,
+		GasPrice: big.NewInt(5),
+		Gas:      12,
+		To:       &backend.relay.relayerPayoutAddress,
+		Value:    big.NewInt(10),
+		Data:     []byte(""),
+	})
+	tx3byte, err := tx3.MarshalBinary()
+	require.NoError(t, err)
+	tx4byte, err := tx4.MarshalBinary()
+	require.NoError(t, err)
+	txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx3byte, tx4byte}}
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot + 1,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err := req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr := backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+	fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
+	require.Equal(t, tobTxValue, big.NewInt(10))
+
+	tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, len(tobtxs))
+
+	firstTx := new(gethtypes.Transaction)
+	err = firstTx.UnmarshalBinary(tobtxs[0])
+
+	firstTxJson, err := firstTx.MarshalJSON()
+	require.NoError(t, err)
+	tx1Json, err := tx3.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, firstTxJson, tx1Json)
+
+	secondTx := new(gethtypes.Transaction)
+	err = secondTx.UnmarshalBinary(tobtxs[1])
+	secondTxJson, err := secondTx.MarshalJSON()
+	require.NoError(t, err)
+	tx2Json, err := tx4.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, secondTxJson, tx2Json)
+
+	// Test 4: Past slot
+	req = &common.TobTxsSubmitRequest{
+		ParentHash: parentHash,
+		TobTxs:     txs,
+		Slot:       headSlot - 2,
+	}
+	fmt.Printf("Marshalling request to json!!")
+	jsonReq, err = req.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Printf("Unmarshalling request from json!!")
+
+	rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+		"Content-Type": "application/json",
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Contains(t, rr.Body.String(), "Submitted TOB tx request for past slot!")
 }
 
 func TestBuilderSubmitBlock(t *testing.T) {
