@@ -476,17 +476,19 @@ type TobTxsSubmitRequest struct {
 	ParentHash string
 }
 
+type IntermediateTobTxsSubmitRequest struct {
+	TobTxs     []byte `json:"tobTxs"`
+	Slot       uint64 `json:"slot"`
+	ParentHash string `json:"parentHash"`
+}
+
 func (t *TobTxsSubmitRequest) MarshalJSON() ([]byte, error) {
 	txBytes, err := t.TobTxs.MarshalSSZ()
 	if err != nil {
 		return nil, err
 	}
 
-	return json.Marshal(struct {
-		TobTxs     []byte `json:"tobTxs"`
-		Slot       uint64 `json:"slot"`
-		ParentHash string `json:"parentHash"`
-	}{
+	return json.Marshal(IntermediateTobTxsSubmitRequest{
 		TobTxs:     txBytes,
 		Slot:       t.Slot,
 		ParentHash: t.ParentHash,
@@ -494,11 +496,7 @@ func (t *TobTxsSubmitRequest) MarshalJSON() ([]byte, error) {
 }
 
 func (t *TobTxsSubmitRequest) UnmarshalJSON(data []byte) error {
-	var intermediateJson struct {
-		TobTxs     []byte `json:"tobTxs"`
-		Slot       uint64 `json:"slot"`
-		ParentHash string `json:"parentHash"`
-	}
+	var intermediateJson IntermediateTobTxsSubmitRequest
 	err := json.Unmarshal(data, &intermediateJson)
 	if err != nil {
 		return err
