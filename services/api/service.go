@@ -1695,17 +1695,13 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *log
 
 	// Start: Payout checks
 	lastTx := txs[len(txs)-1]
-	log.Info("DEBUG: last tx is ", lastTx)
 
-	log.Info("DEBUG: Checking the TO address of the last tx")
 	if lastTx.To() != nil && *lastTx.To() != api.relayerPayoutAddress {
 		return fmt.Errorf("We require a payment tx to the relayer along with the TOB txs!")
 	}
-	log.Info("DEBUG: Checking the value of the last tx")
 	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
 		return fmt.Errorf("The relayer payment tx is non-zero!")
 	}
-	log.Info("DEBUG: Checking the data of the last tx")
 	if len(lastTx.Data()) != 0 {
 		return fmt.Errorf("The relayer payment tx has malformed data!")
 	}
@@ -1730,7 +1726,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		"timestampRequestStart": receivedAt.UnixMilli(),
 	})
 
-	log.Info("DEBUG: submit TOB Txs request initiated")
 	defer func() {
 		log.WithFields(logrus.Fields{
 			"timestampRequestFin": time.Now().UTC().UnixMilli(),
@@ -1764,7 +1759,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	log.Info("DEBUG: submit TOB Txs request decoded", "tobTxRequest", tobTxRequest)
 	slot := tobTxRequest.Slot
 	parentHash := tobTxRequest.ParentHash
 	if len(tobTxRequest.TobTxs.Transactions) == 0 {
@@ -1801,7 +1795,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
 		return
 	}
-	log.Info("DEBUG: decoded txs are ", txs)
 
 	// TODO - check the validity of txs
 
@@ -1824,8 +1817,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	tx := api.redis.NewTxPipeline()
 
 	tobTxValue := lastTx.Value()
-	log.Info("DEBUG: tobTxValue is ", tobTxValue)
-	log.Info("DEBUG: Writing TobTxValue to redis cache with key", slot, parentHash)
 	// store it in a redis cache. The ROB block will pick it up and assemble it along with its own txs
 	currentTobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, slot, parentHash)
 	if err != nil {
@@ -1833,10 +1824,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	log.Info("DEBUG: currentTobTxValue is ", currentTobTxValue)
-	log.Info("DEBUG: tobTxValue is ", tobTxValue)
-	log.Info("DEBUG: tobTxValue.Cmp(currentTobTxValue) is ", tobTxValue.Cmp(currentTobTxValue))
-	log.Info("DEBUG: Wrote TobTxValue to redis cache with key", slot, parentHash)
 
 	if currentTobTxValue.Cmp(tobTxValue) > 0 {
 		log.Error("TOB tx value is less than the current value!")
@@ -2046,7 +2033,6 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	// Get the best TOB tx value set from Redis
 	// If so proceed with assembly.
 	// check if there is a TOB tx
-	log.Info("DEBUG: checking for tob txs")
 	tobTxs, err := api.redis.GetTobTx(context.Background(), tx, payload.Slot(), payload.ParentHash())
 	if err != nil {
 		log.WithError(err).Error("failed to get tob txs from redis")
@@ -2056,7 +2042,6 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	totalBidValue := payload.Value()
 
 	if len(tobTxs) > 0 {
-		log.Info("DEBUG: tob txs found")
 		tobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, payload.Slot(), payload.ParentHash())
 		if err != nil {
 			log.WithError(err).Error("failed to get tob tx value from redis")
@@ -2064,10 +2049,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		}
 
 		totalBidValue = new(big.Int).Add(payload.Value(), tobTxValue)
-	} else {
-		log.Info("DEBUG: no tob txs found")
 	}
-
 	// Get the latest top bid value from Redis
 	bidIsTopBid := false
 	topBidValue, err := api.redis.GetTopBidValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
@@ -2101,7 +2083,6 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 			}
 		}
 
-		log.Info("DEBUG: Building out the final aggregated payload")
 		// building the final aggregated payload
 		originalPayloadMessage := payload.Message()
 		finalBuilderSubmission := &common.BuilderSubmitBlockRequest{
@@ -2122,22 +2103,16 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 				Signature:        payload.Signature(),
 			},
 		}
-		log.Info("DEBUG: Done building out the final aggregated payload")
 
-		log.Info("DEBUG: Saving the builder block submission to the database")
 		submissionEntry, err := api.db.SaveBuilderBlockSubmission(finalBuilderSubmission, res.requestErr, res.validationErr, receivedAt, eligibleAt, true, savePayloadToDatabase, pf, false)
 		if err != nil {
 			log.WithError(err).WithField("payload", payload).Error("saving builder block submission to database failed")
 			return
 		}
-		log.Info("DEBUG: Done saving the builder block submission to the database")
-
-		log.Info("DEBUG: Saving the block builder entry to the database")
 		err = api.db.UpsertBlockBuilderEntryAfterSubmission(submissionEntry, false)
 		if err != nil {
 			log.WithError(err).Error("failed to upsert block-builder-entry")
 		}
-		log.Info("DEBUG: Done saving the block builder entry to the database")
 	}()
 
 	tobTxsToSendToAssembler := bellatrix.ExecutionPayloadTransactions{
@@ -2157,23 +2132,18 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		},
 	}
 
-	log.Info("DEBUG: Opts for block assembly is set\n", opts)
-
 	timeBeforeAssembly := time.Now().UTC()
 
 	log = log.WithFields(logrus.Fields{
 		"timestampBeforeAssembly": timeBeforeAssembly.UTC().UnixMilli(),
 	})
 
-	log.Info("DEBUG: Assembling the block")
 	assembledPayload, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
-	log.Info("DEBUG: Done assembling the block")
 	assemblyResultC <- &blockAssemblyResult{
 		assembledPayload: assembledPayload,
 		requestErr:       requestErr,
 		validationErr:    validationErr,
 	}
-	log.Info("DEBUG: Done sending the block assembly result to the channel with res\n", assembledPayload)
 	assemblyDurationMs := time.Since(timeBeforeAssembly).Milliseconds()
 	log = log.WithFields(logrus.Fields{
 		"timestampAfterAssembly": time.Now().UTC().UnixMilli(),
@@ -2193,7 +2163,6 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		}
 	}
 
-	log.Info("DEBUG: Preparing the get header response")
 	// Prepare the response data
 	getHeaderResponse, err := common.BuildGetHeaderResponse(payload, api.blsSk, api.publicKey, api.opts.EthNetDetails.DomainBuilder)
 	if err != nil {
@@ -2202,7 +2171,6 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		return
 	}
 
-	log.Info("DEBUG: Preparing the get payload response")
 	getPayloadResponse, err := common.BuildGetPayloadResponse(payload)
 	if err != nil {
 		log.WithError(err).Error("could not build getPayload response")
@@ -2220,7 +2188,6 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	//
 	// Save to Redis
 	//
-	log.Info("DEBUG: Saving the bid and updating the top bids")
 	updateBidResult, err := api.redis.SaveBidAndUpdateTopBid(context.Background(), tx, &bidTrace, payload, getPayloadResponse, getHeaderResponse, receivedAt, isCancellationEnabled, big.NewInt(0))
 	if err != nil {
 		log.WithError(err).Error("could not save bid and update top bids")
