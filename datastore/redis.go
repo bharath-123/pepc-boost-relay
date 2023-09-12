@@ -23,7 +23,7 @@ import (
 var (
 	redisPrefix = "boost-relay"
 
-	expiryBidCache = 1000 * time.Second
+	expiryBidCache = 45 * time.Second
 
 	RedisConfigFieldPubkey         = "pubkey"
 	RedisStatsFieldLatestSlot      = "latest-slot"
