@@ -84,7 +84,7 @@ var (
 	pathDataGetCurrentTobTx          = "/relay/v1/data/current_tob_tx"
 	// this is for the builders to know if they are interacting with a pepc relayer or not.
 	// this solution is so that builder can enable pepc relayer specific features like validator payout changes etc
-	pathDataIsRelayerPepc = "/relay/v1/builder/is_relayer_pepc"
+	pathDataIsPepcRelayer = "/relay/v1/data/is_pepc_relayer"
 
 	// Internal API
 	pathInternalBuilderStatus     = "/internal/v1/builder/{pubkey:0x[a-fA-F0-9]+}"
@@ -388,7 +388,7 @@ func (api *RelayAPI) getRouter() http.Handler {
 		r.HandleFunc(pathDataBuilderBidsReceived, api.handleDataBuilderBidsReceived).Methods(http.MethodGet)
 		r.HandleFunc(pathDataValidatorRegistration, api.handleDataValidatorRegistration).Methods(http.MethodGet)
 		r.HandleFunc(pathDataGetCurrentTobTx, api.handleDataGetCurrentTobTx).Methods(http.MethodGet)
-		r.HandleFunc(pathDataIsRelayerPepc, api.handleDataIsRelayerPepc).Methods(http.MethodGet)
+		r.HandleFunc(pathDataIsPepcRelayer, api.handleDataIsPepcRelayer).Methods(http.MethodGet)
 	}
 
 	// Pprof
@@ -2971,7 +2971,7 @@ func (api *RelayAPI) handleDataGetCurrentTobTx(w http.ResponseWriter, req *http.
 
 }
 
-func (api *RelayAPI) handleDataIsRelayerPepc(w http.ResponseWriter, req *http.Request) {
+func (api *RelayAPI) handleDataIsPepcRelayer(w http.ResponseWriter, req *http.Request) {
 	// TODO - Add a flag to enable and disable PEPC activities. For now, we always return true.
 	api.RespondMsg(w, http.StatusOK, "true")
 }
