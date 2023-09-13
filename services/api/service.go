@@ -2050,6 +2050,8 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		})
 	}
 
+	// TODO - if there are no ToB txs but we have encountered the highest bid, simulate the block instead of assembling it
+
 	// we have a TOB tx, now assemble the block. Block assembly has the same properties as simulation but returns the final
 	// execution payload. If there are no TOB txs, we send an empty list to the assembler
 	assemblyResultC := make(chan *blockAssemblyResult, 1)
