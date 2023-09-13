@@ -25,6 +25,8 @@ import (
 	"github.com/attestantio/go-eth2-client/api/v1/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/buger/jsonparser"
+	common2 "github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/flashbots/go-boost-utils/bls"
 	boostTypes "github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/go-utils/cli"
@@ -67,6 +69,7 @@ var (
 	// Block builder API
 	pathBuilderGetValidators = "/relay/v1/builder/validators"
 	pathSubmitNewBlock       = "/relay/v1/builder/blocks"
+	pathSubmitNewTobTxs      = "/relay/v1/builder/tob_txs"
 
 	// Data API
 	pathDataProposerPayloadDelivered = "/relay/v1/data/bidtraces/proposer_payload_delivered"
@@ -76,6 +79,8 @@ var (
 	// Internal API
 	pathInternalBuilderStatus     = "/internal/v1/builder/{pubkey:0x[a-fA-F0-9]+}"
 	pathInternalBuilderCollateral = "/internal/v1/builder/collateral/{pubkey:0x[a-fA-F0-9]+}"
+
+	relayerPayoutAddress = common2.HexToAddress("0x4E9A3d9D1cd2A2b2371b8b3F489aE72259886f1A")
 
 	// number of goroutines to save active validator
 	numValidatorRegProcessors = cli.GetEnvInt("NUM_VALIDATOR_REG_PROCESSORS", 10)
@@ -174,6 +179,8 @@ type RelayAPI struct {
 	srvStarted  uberatomic.Bool
 	srvShutdown uberatomic.Bool
 
+	relayerPayoutAddress common2.Address
+
 	beaconClient beaconclient.IMultiBeaconClient
 	datastore    *datastore.Datastore
 	redis        *datastore.RedisCache
@@ -267,15 +274,16 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 	}
 
 	api = &RelayAPI{
-		opts:         opts,
-		log:          opts.Log,
-		blsSk:        opts.SecretKey,
-		publicKey:    &publicKey,
-		datastore:    opts.Datastore,
-		beaconClient: opts.BeaconClient,
-		redis:        opts.Redis,
-		memcached:    opts.Memcached,
-		db:           opts.DB,
+		opts:                 opts,
+		log:                  opts.Log,
+		blsSk:                opts.SecretKey,
+		publicKey:            &publicKey,
+		relayerPayoutAddress: relayerPayoutAddress,
+		datastore:            opts.Datastore,
+		beaconClient:         opts.BeaconClient,
+		redis:                opts.Redis,
+		memcached:            opts.Memcached,
+		db:                   opts.DB,
 
 		payloadAttributes: make(map[string]payloadAttributesHelper),
 
@@ -344,6 +352,7 @@ func (api *RelayAPI) getRouter() http.Handler {
 		api.log.Info("block builder API enabled")
 		r.HandleFunc(pathBuilderGetValidators, api.handleBuilderGetValidators).Methods(http.MethodGet)
 		r.HandleFunc(pathSubmitNewBlock, api.handleSubmitNewBlock).Methods(http.MethodPost)
+		r.HandleFunc(pathSubmitNewTobTxs, api.handleSubmitNewTobTxs).Methods(http.MethodPost)
 	}
 
 	// Data API
@@ -1593,6 +1602,199 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 	}
 
 	return builderEntry, true
+}
+
+// Checks the quality of the TOB txs, if it is the txs expected in a TOB
+func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction) error {
+	if len(txs) > 2 {
+		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
+	}
+
+	// TODO - check if nonce is valid
+	// TODO - check if tx has already been included in a block
+	firstTx := txs[0]
+	if firstTx.To() == nil {
+		return fmt.Errorf("contract creation cannot be a TOB tx")
+	}
+	// This address is from the kurtosis local devnet. Need to expand state interference checks
+	if *firstTx.To() != common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e") {
+		return fmt.Errorf("TOB tx can only be sent to uniswap v2 router")
+	}
+
+	// TODO - add check for whether the tx is a eth/usdc swap
+	return nil
+}
+
+// This method checks the following:
+// 1. If the tx has already been included in a block
+// 2. If the user sending the tx has enough balance to pay for the tx
+// 3. If the sender nonce is valid
+// 4. Checks if the final tx is a validator payout
+func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *logrus.Entry) error {
+	// TODO - ALL PAYOUT RELATED THINGS!
+	// TODO - Finish the payout tx validation like check the sender account balance. We don't have to validate the builder payout txs. The onus of
+	// it falls on the builder
+	// TODO - we need to add a new tx to the TOB txs which sends the payout from the relayer to the validator and the builder. Pick this up once other things are done
+	// TODO - check all the txs to see if the nonce is valid, value is valid, check if the tx has already been included. These can be confirmed from the
+	// execution layer. We should ideally
+	// TODO - Add state interference checks as in checkTobTxsStateInterference
+
+	// Start: Payout checks
+	lastTx := txs[len(txs)-1]
+
+	if lastTx.To() != nil && *lastTx.To() != api.relayerPayoutAddress {
+		return fmt.Errorf("We require a payment tx to the relayer along with the TOB txs!")
+	}
+	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
+		return fmt.Errorf("The relayer payment tx is non-zero!")
+	}
+	if len(lastTx.Data()) != 0 {
+		return fmt.Errorf("The relayer payment tx has malformed data!")
+	}
+	// TODO - extend payout checks
+	// End: Payout checks
+
+	// State interference checks
+	return api.checkTobTxsStateInterference(txs)
+}
+
+func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Request) {
+	//var pf common.Profile
+	//var prevTime, nextTime time.Time
+	headSlot := api.headSlot.Load()
+	receivedAt := time.Now().UTC()
+	//prevTime = receivedAt
+
+	log := api.log.WithFields(logrus.Fields{
+		"method":                "submitTobTxs",
+		"contentLength":         req.ContentLength,
+		"headSlot":              headSlot,
+		"timestampRequestStart": receivedAt.UnixMilli(),
+	})
+
+	defer func() {
+		log.WithFields(logrus.Fields{
+			"timestampRequestFin": time.Now().UTC().UnixMilli(),
+			"requestDurationMs":   time.Since(receivedAt).Milliseconds(),
+		}).Info("request finished")
+	}()
+
+	tobTxRequest := new(common.TobTxsSubmitRequest)
+
+	var r io.Reader = req.Body
+	limitReader := io.LimitReader(r, 10*1024*1024) // 10 MB
+	requestBytes, err := io.ReadAll(limitReader)
+	if err != nil {
+		log.WithError(err).Warn("could not read payload")
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Check for JSON encoding
+	contentType := req.Header.Get("Content-Type")
+	if contentType == "application/json" {
+		log = log.WithField("reqContentType", "json")
+		if err := json.Unmarshal(requestBytes, tobTxRequest); err != nil {
+			log.WithError(err).Warn("could not decode payload - JSON")
+			api.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else {
+		log.Error("We do not support non-JSON requests yet!", contentType)
+		api.Respond(w, http.StatusBadRequest, "invalid content-type")
+		return
+	}
+
+	slot := tobTxRequest.Slot
+	parentHash := tobTxRequest.ParentHash
+	if len(tobTxRequest.TobTxs.Transactions) == 0 {
+		log.Error("Empty TOB tx request sent!")
+		api.Respond(w, http.StatusBadRequest, "Empty TOB tx request sent!")
+		return
+	}
+	//
+	if slot < headSlot {
+		log.Error("TOB tx request for past slot!")
+		api.Respond(w, http.StatusBadRequest, "Submitted TOB tx request for past slot!")
+		return
+	}
+
+	// We only allow bidding for TOB 1 slot prior
+	if slot-headSlot > 1 {
+		log.Error("Slot's TOB bid not yet started!!")
+		api.Respond(w, http.StatusBadRequest, "Slot's TOB bid not yet started!!")
+	}
+
+	// decode the txs
+	transactionBytes := make([][]byte, len(tobTxRequest.TobTxs.Transactions))
+	for i, txHexBytes := range tobTxRequest.TobTxs.Transactions {
+		transactionBytes[i] = txHexBytes[:]
+	}
+	txs, err := common.DecodeTransactions(transactionBytes)
+	if err != nil {
+		log.WithError(err).Warn("could not decode transactions")
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(txs) == 1 {
+		log.Error("We require a payment tx along with the TOB txs!")
+		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
+		return
+	}
+
+	err = api.checkTxAndSenderValidity(txs, log)
+	if err != nil {
+		log.WithError(err).Warn("error validating the txs")
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	lastTx := txs[len(txs)-1]
+
+	err = api.checkTobTxsStateInterference(txs)
+	if err != nil {
+		log.WithError(err).Warn("could not validate tob txs")
+		api.RespondError(w, http.StatusInternalServerError, err.Error())
+	}
+
+	tx := api.redis.NewTxPipeline()
+
+	tobTxValue := lastTx.Value()
+	// store it in a redis cache. The ROB block will pick it up and assemble it along with its own txs
+	currentTobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, slot, parentHash)
+	if err != nil {
+		log.WithError(err).Warn("could not get current Tob Tx value")
+		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if currentTobTxValue.Cmp(tobTxValue) > 0 {
+		log.Error("TOB tx value is less than the current value!")
+		api.Respond(w, http.StatusBadRequest, "TOB tx value is less than the current value!")
+		return
+	}
+
+	// TODO - bchain - simulate the txs on the parent block. If it fails, reject the txs.
+	// This is already solved and should be straightforward to implement. its basically simulation
+	// with some additional checks
+
+	// add the tob tx to the redis cache
+	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
+	if err != nil {
+		log.WithError(err).Warn("could not set Tob Tx")
+		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// set the tob tx value in the redis cache
+	err = api.redis.SetTobTxValue(context.Background(), tx, tobTxValue, slot, parentHash)
+	if err != nil {
+		log.WithError(err).Warn("could not set Tob Tx Value")
+		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	api.Respond(w, http.StatusOK, "Tob Tx submitted successfully!")
+	return
 }
 
 func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Request) {
