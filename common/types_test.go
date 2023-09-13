@@ -1,6 +1,7 @@
 package common
 
 import (
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -130,4 +131,57 @@ func TestTobTxSubmitRequestJsonEncodingAndDecoding(t *testing.T) {
 	decodedTxRoot, err := decodedTobTxRequest.TobTxs.HashTreeRoot()
 	require.NoError(t, err)
 	require.Equal(t, txRoot, decodedTxRoot)
+}
+
+func TestBlockAssemblerRequestJsonEncodingAndDecoding(t *testing.T) {
+	testAddr := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+	requestPayloadJSONBytes := LoadGzippedBytes(t, "../testdata/submitBlockPayloadCapella_Goerli.json.gz")
+
+	blockSubmitRequest := new(BuilderSubmitBlockRequest)
+	err := json.Unmarshal(requestPayloadJSONBytes, &blockSubmitRequest)
+	require.NoError(t, err)
+
+	tx1 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    1,
+		GasPrice: big.NewInt(1),
+		Gas:      1,
+		To:       &testAddr,
+		Value:    big.NewInt(1),
+		Data:     []byte("tx1"),
+	})
+	tx2 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    2,
+		GasPrice: big.NewInt(2),
+		Gas:      2,
+		To:       &testAddr,
+		Value:    big.NewInt(2),
+		Data:     []byte("tx2"),
+	})
+	tx1byte, err := tx1.MarshalBinary()
+	require.NoError(t, err)
+	tx2byte, err := tx2.MarshalBinary()
+	require.NoError(t, err)
+	txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{tx1byte, tx2byte}}
+	txRoot, err := txs.HashTreeRoot()
+	require.NoError(t, err)
+
+	gasLimit := uint64(10000)
+
+	assemblyRequest := BlockAssemblerRequest{
+		TobTxs:             txs,
+		RobPayload:         *blockSubmitRequest,
+		RegisteredGasLimit: gasLimit,
+	}
+
+	encodedAssemblyRequest, err := assemblyRequest.MarshalJSON()
+	require.NoError(t, err)
+	decodedAssemblyRequest := new(BlockAssemblerRequest)
+	err = decodedAssemblyRequest.UnmarshalJSON(encodedAssemblyRequest)
+	require.NoError(t, err)
+
+	decodedTxsRoot, err := decodedAssemblyRequest.TobTxs.HashTreeRoot()
+	require.NoError(t, err)
+	require.Equal(t, txRoot, decodedTxsRoot)
+	require.Equal(t, assemblyRequest.RegisteredGasLimit, decodedAssemblyRequest.RegisteredGasLimit)
+	require.Equal(t, assemblyRequest.RobPayload, decodedAssemblyRequest.RobPayload)
 }
