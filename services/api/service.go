@@ -1925,18 +1925,23 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	})
 
 	if payload.Message() == nil || !payload.HasExecutionPayload() {
+		log.Error("submitNewBlock failed: missing execution payload")
 		api.RespondError(w, http.StatusBadRequest, "missing parts of the payload")
 		return
 	}
 
 	ok := api.checkSubmissionSlotDetails(w, log, headSlot, payload)
 	if !ok {
+		log.WithError(err).Info("slot details check failed")
+		api.RespondError(w, http.StatusBadRequest, "slot details check failed")
 		return
 	}
 
 	builderPubkey := payload.BuilderPubkey()
 	builderEntry, ok := api.checkBuilderEntry(w, log, builderPubkey)
 	if !ok {
+		log.WithError(err).Info("builder entry check failed")
+		api.RespondError(w, http.StatusBadRequest, "builder entry check failed")
 		return
 	}
 
@@ -1947,6 +1952,8 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 
 	gasLimit, ok := api.checkSubmissionFeeRecipient(w, log, payload)
 	if !ok {
+		log.WithError(err).Info("fee recipient check failed")
+		api.RespondError(w, http.StatusBadRequest, "fee recipient check failed")
 		return
 	}
 
@@ -1969,6 +1976,8 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 
 	ok = api.checkSubmissionPayloadAttrs(w, log, payload)
 	if !ok {
+		log.WithError(err).Info("payload attributes check failed")
+		api.RespondError(w, http.StatusBadRequest, "payload attributes check failed")
 		return
 	}
 
