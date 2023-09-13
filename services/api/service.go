@@ -1851,14 +1851,10 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	receivedAt := time.Now().UTC()
 	prevTime = receivedAt
 
-	args := req.URL.Query()
-	isCancellationEnabled := args.Get("cancellations") == "1"
-
 	log := api.log.WithFields(logrus.Fields{
 		"method":                "submitNewBlock",
 		"contentLength":         req.ContentLength,
 		"headSlot":              headSlot,
-		"cancellationEnabled":   isCancellationEnabled,
 		"timestampRequestStart": receivedAt.UnixMilli(),
 	})
 
@@ -2121,14 +2117,12 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		},
 	}
 
-	log.Info("DEBUG: Block assembly request is ", "req", opts.req)
 	timeBeforeAssembly := time.Now().UTC()
 
 	log = log.WithFields(logrus.Fields{
 		"timestampBeforeAssembly": timeBeforeAssembly.UTC().UnixMilli(),
 	})
 
-	log.Info("DEBUG: Assembling block now!")
 	assembledPayload, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
 	assemblyResultC <- &blockAssemblyResult{
 		assembledPayload: assembledPayload,
@@ -2179,7 +2173,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	//
 	// Save to Redis
 	//
-	updateBidResult, err := api.redis.SaveBidAndUpdateTopBid(context.Background(), tx, &bidTrace, payload, getPayloadResponse, getHeaderResponse, receivedAt, isCancellationEnabled, big.NewInt(0))
+	updateBidResult, err := api.redis.SaveBidAndUpdateTopBid(context.Background(), tx, &bidTrace, payload, getPayloadResponse, getHeaderResponse, receivedAt, false, nil)
 	if err != nil {
 		log.WithError(err).Error("could not save bid and update top bids")
 		api.RespondError(w, http.StatusInternalServerError, "failed saving and updating bid")

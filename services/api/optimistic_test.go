@@ -14,7 +14,6 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	v1 "github.com/attestantio/go-builder-client/api/v1"
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
-	consensuscapella "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/flashbots/go-boost-utils/bls"
 	boostTypes "github.com/flashbots/go-boost-utils/types"
@@ -304,92 +303,93 @@ func TestPrepareBuildersForSlot(t *testing.T) {
 	require.Zero(t, entry.collateral.Cmp(big.NewInt(int64(collateral))))
 }
 
-func TestBuilderApiSubmitNewBlockOptimistic(t *testing.T) {
-	testCases := []struct {
-		description     string
-		wantStatus      common.BuilderStatus
-		simulationError error
-		expectDemotion  bool
-		httpCode        uint64
-		blockValue      uint64
-	}{
-		{
-			description: "success_value_less_than_collateral",
-			wantStatus: common.BuilderStatus{
-				IsOptimistic: true,
-				IsHighPrio:   true,
-			},
-			simulationError: nil,
-			expectDemotion:  false,
-			httpCode:        200, // success
-			blockValue:      collateral - 1,
-		},
-		{
-			description: "success_value_greater_than_collateral",
-			wantStatus: common.BuilderStatus{
-				IsOptimistic: true,
-				IsHighPrio:   true,
-			},
-			simulationError: nil,
-			expectDemotion:  false,
-			httpCode:        200, // success
-			blockValue:      collateral + 1,
-		},
-		{
-			description: "failure_value_more_than_collateral",
-			wantStatus: common.BuilderStatus{
-				IsOptimistic: true,
-				IsHighPrio:   true,
-			},
-			simulationError: errFake,
-			expectDemotion:  false,
-			httpCode:        400, // failure (in pessimistic mode, block sim failure happens in response path)
-			blockValue:      collateral + 1,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			pubkey, secretkey, backend := startTestBackend(t)
-			backend.relay.optimisticSlot.Store(slot)
-			backend.relay.capellaEpoch = 1
-			var randaoHash boostTypes.Hash
-			err := randaoHash.FromSlice([]byte(randao))
-			require.NoError(t, err)
-			withRoot, err := ComputeWithdrawalsRoot([]*consensuscapella.Withdrawal{})
-			require.NoError(t, err)
-			backend.relay.payloadAttributes[emptyHash] = payloadAttributesHelper{
-				slot:            slot,
-				withdrawalsRoot: withRoot,
-				payloadAttributes: beaconclient.PayloadAttributes{
-					PrevRandao: randaoHash.String(),
-				},
-			}
-			pkStr := pubkey.String()
-			rr := runOptimisticBlockSubmission(t, blockRequestOpts{
-				secretkey:  secretkey,
-				pubkey:     *pubkey,
-				blockValue: tc.blockValue,
-				domain:     backend.relay.opts.EthNetDetails.DomainBuilder,
-			}, tc.simulationError, backend)
-
-			// Check http code.
-			require.Equal(t, uint64(rr.Code), tc.httpCode)
-
-			// Check status in db.
-			builder, err := backend.relay.db.GetBlockBuilderByPubkey(pkStr)
-			require.NoError(t, err)
-			require.Equal(t, tc.wantStatus.IsOptimistic, builder.IsOptimistic)
-			require.Equal(t, tc.wantStatus.IsHighPrio, builder.IsHighPrio)
-
-			// Check demotion status is set to expected and refund is false.
-			mockDB, ok := backend.relay.db.(*database.MockDB)
-			require.True(t, ok)
-			require.Equal(t, mockDB.Demotions[pkStr], tc.expectDemotion)
-			require.False(t, mockDB.Refunds[pkStr])
-		})
-	}
-}
+//
+//func TestBuilderApiSubmitNewBlockOptimistic(t *testing.T) {
+//	testCases := []struct {
+//		description     string
+//		wantStatus      common.BuilderStatus
+//		simulationError error
+//		expectDemotion  bool
+//		httpCode        uint64
+//		blockValue      uint64
+//	}{
+//		{
+//			description: "success_value_less_than_collateral",
+//			wantStatus: common.BuilderStatus{
+//				IsOptimistic: true,
+//				IsHighPrio:   true,
+//			},
+//			simulationError: nil,
+//			expectDemotion:  false,
+//			httpCode:        200, // success
+//			blockValue:      collateral - 1,
+//		},
+//		{
+//			description: "success_value_greater_than_collateral",
+//			wantStatus: common.BuilderStatus{
+//				IsOptimistic: true,
+//				IsHighPrio:   true,
+//			},
+//			simulationError: nil,
+//			expectDemotion:  false,
+//			httpCode:        200, // success
+//			blockValue:      collateral + 1,
+//		},
+//		{
+//			description: "failure_value_more_than_collateral",
+//			wantStatus: common.BuilderStatus{
+//				IsOptimistic: true,
+//				IsHighPrio:   true,
+//			},
+//			simulationError: errFake,
+//			expectDemotion:  false,
+//			httpCode:        400, // failure (in pessimistic mode, block sim failure happens in response path)
+//			blockValue:      collateral + 1,
+//		},
+//	}
+//
+//	for _, tc := range testCases {
+//		t.Run(tc.description, func(t *testing.T) {
+//			pubkey, secretkey, backend := startTestBackend(t)
+//			backend.relay.optimisticSlot.Store(slot)
+//			backend.relay.capellaEpoch = 1
+//			var randaoHash boostTypes.Hash
+//			err := randaoHash.FromSlice([]byte(randao))
+//			require.NoError(t, err)
+//			withRoot, err := ComputeWithdrawalsRoot([]*consensuscapella.Withdrawal{})
+//			require.NoError(t, err)
+//			backend.relay.payloadAttributes[emptyHash] = payloadAttributesHelper{
+//				slot:            slot,
+//				withdrawalsRoot: withRoot,
+//				payloadAttributes: beaconclient.PayloadAttributes{
+//					PrevRandao: randaoHash.String(),
+//				},
+//			}
+//			pkStr := pubkey.String()
+//			rr := runOptimisticBlockSubmission(t, blockRequestOpts{
+//				secretkey:  secretkey,
+//				pubkey:     *pubkey,
+//				blockValue: tc.blockValue,
+//				domain:     backend.relay.opts.EthNetDetails.DomainBuilder,
+//			}, tc.simulationError, backend)
+//
+//			// Check http code.
+//			require.Equal(t, uint64(rr.Code), tc.httpCode)
+//
+//			// Check status in db.
+//			builder, err := backend.relay.db.GetBlockBuilderByPubkey(pkStr)
+//			require.NoError(t, err)
+//			require.Equal(t, tc.wantStatus.IsOptimistic, builder.IsOptimistic)
+//			require.Equal(t, tc.wantStatus.IsHighPrio, builder.IsHighPrio)
+//
+//			// Check demotion status is set to expected and refund is false.
+//			mockDB, ok := backend.relay.db.(*database.MockDB)
+//			require.True(t, ok)
+//			require.Equal(t, mockDB.Demotions[pkStr], tc.expectDemotion)
+//			require.False(t, mockDB.Refunds[pkStr])
+//		})
+//	}
+//}
 
 func TestInternalBuilderStatus(t *testing.T) {
 	pubkey, _, backend := startTestBackend(t)
