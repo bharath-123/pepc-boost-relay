@@ -1677,28 +1677,23 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction) erro
 // 3. If the sender nonce is valid
 // 4. Checks if the final tx is a validator payout
 func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *logrus.Entry) error {
-	// TODO - ALL PAYOUT RELATED THINGS!
-	// TODO - Finish the payout tx validation like check the sender account balance. We don't have to validate the builder payout txs. The onus of
-	// it falls on the builder
-	// TODO - we need to add a new tx to the TOB txs which sends the payout from the relayer to the validator and the builder. Pick this up once other things are done
+	// TODO - payouts still need to be modelled
 	// TODO - check all the txs to see if the nonce is valid, value is valid, check if the tx has already been included. These can be confirmed from the
 	// execution layer. We should ideally
-	// TODO - Add state interference checks as in checkTobTxsStateInterference
+	// TODO - Add state interference checks as mentioned in checkTobTxsStateInterference
 
 	// Start: Payout checks
 	lastTx := txs[len(txs)-1]
 
 	if lastTx.To() != nil && *lastTx.To() != api.relayerPayoutAddress {
-		return fmt.Errorf("We require a payment tx to the relayer along with the TOB txs!")
+		return fmt.Errorf("we require a payment tx to the relayer along with the TOB txs")
 	}
 	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
-		return fmt.Errorf("The relayer payment tx is non-zero!")
+		return fmt.Errorf("the relayer payment tx is non-zero")
 	}
 	if len(lastTx.Data()) != 0 {
-		return fmt.Errorf("The relayer payment tx has malformed data!")
+		return fmt.Errorf("the relayer payment tx has malformed data")
 	}
-	// TODO - extend payout checks
-	// End: Payout checks
 
 	// State interference checks
 	return api.checkTobTxsStateInterference(txs)
@@ -1796,12 +1791,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	}
 
 	lastTx := txs[len(txs)-1]
-
-	err = api.checkTobTxsStateInterference(txs)
-	if err != nil {
-		log.WithError(err).Warn("could not validate tob txs")
-		api.RespondError(w, http.StatusInternalServerError, err.Error())
-	}
 
 	tx := api.redis.NewTxPipeline()
 
