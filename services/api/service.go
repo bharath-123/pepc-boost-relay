@@ -184,6 +184,7 @@ type blockSimResult struct {
 
 type blockAssemblyResult struct {
 	assembledPayload *capella2.ExecutionPayload
+	totalBidValue    *big.Int
 	requestErr       error
 	validationErr    error
 }
@@ -1862,14 +1863,10 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	receivedAt := time.Now().UTC()
 	prevTime = receivedAt
 
-	args := req.URL.Query()
-	isCancellationEnabled := args.Get("cancellations") == "1"
-
 	log := api.log.WithFields(logrus.Fields{
 		"method":                "submitNewBlock",
 		"contentLength":         req.ContentLength,
 		"headSlot":              headSlot,
-		"cancellationEnabled":   isCancellationEnabled,
 		"timestampRequestStart": receivedAt.UnixMilli(),
 	})
 
@@ -2026,6 +2023,61 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		return
 	}
 
+	// Bid is looking good. Now we can begin the block assembly if the bid value is higher than the current highest bid
+
+	// we have a TOB tx, now assemble the block. Block assembly has the same properties as simulation but returns the final
+	// execution payload. If there are no TOB txs, we send an empty list to the assembler
+	assemblyResultC := make(chan *blockAssemblyResult, 1)
+	var eligibleAt time.Time // will be set once the bid is ready
+
+	// Deferred saving of the builder submission to database (whenever this function ends)
+	defer func() {
+		savePayloadToDatabase := !api.ffDisablePayloadDBStorage
+		var res *blockAssemblyResult
+		select {
+		case res = <-assemblyResultC:
+		case <-time.After(10 * time.Second):
+			log.Warn("timed out waiting for assembly result")
+			res = &blockAssemblyResult{
+				assembledPayload: nil,
+				totalBidValue:    nil,
+				requestErr:       nil,
+				validationErr:    nil,
+			}
+		}
+
+		// building the final aggregated payload
+		originalPayloadMessage := payload.Message()
+		finalBuilderSubmission := &common.BuilderSubmitBlockRequest{
+			Bellatrix: payload.Bellatrix,
+			Capella: &builderCapella.SubmitBlockRequest{
+				Message: &v1.BidTrace{
+					Slot:                 originalPayloadMessage.Slot,
+					ParentHash:           originalPayloadMessage.ParentHash,
+					BlockHash:            originalPayloadMessage.BlockHash,
+					BuilderPubkey:        originalPayloadMessage.BuilderPubkey,
+					ProposerPubkey:       originalPayloadMessage.ProposerPubkey,
+					ProposerFeeRecipient: originalPayloadMessage.ProposerFeeRecipient,
+					GasLimit:             originalPayloadMessage.GasLimit,
+					GasUsed:              originalPayloadMessage.GasUsed,
+					Value:                uint256.NewInt(res.totalBidValue.Uint64()),
+				},
+				ExecutionPayload: res.assembledPayload,
+				Signature:        payload.Signature(),
+			},
+		}
+
+		submissionEntry, err := api.db.SaveBuilderBlockSubmission(finalBuilderSubmission, res.requestErr, res.validationErr, receivedAt, eligibleAt, true, savePayloadToDatabase, pf, false)
+		if err != nil {
+			log.WithError(err).WithField("payload", payload).Error("saving builder block submission to database failed")
+			return
+		}
+		err = api.db.UpsertBlockBuilderEntryAfterSubmission(submissionEntry, false)
+		if err != nil {
+			log.WithError(err).Error("failed to upsert block-builder-entry")
+		}
+	}()
+
 	// ---------------------------------
 	// THE BID WILL BE ASSEMBLED SHORTLY
 	// ---------------------------------
@@ -2063,58 +2115,6 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		})
 	}
 
-	// we have a TOB tx, now assemble the block. Block assembly has the same properties as simulation but returns the final
-	// execution payload. If there are no TOB txs, we send an empty list to the assembler
-	assemblyResultC := make(chan *blockAssemblyResult, 1)
-	var eligibleAt time.Time // will be set once the bid is ready
-
-	// Deferred saving of the builder submission to database (whenever this function ends)
-	defer func() {
-		savePayloadToDatabase := !api.ffDisablePayloadDBStorage
-		var res *blockAssemblyResult
-		select {
-		case res = <-assemblyResultC:
-		case <-time.After(10 * time.Second):
-			log.Warn("timed out waiting for assembly result")
-			res = &blockAssemblyResult{
-				assembledPayload: nil,
-				requestErr:       nil,
-				validationErr:    nil,
-			}
-		}
-
-		// building the final aggregated payload
-		originalPayloadMessage := payload.Message()
-		finalBuilderSubmission := &common.BuilderSubmitBlockRequest{
-			Bellatrix: payload.Bellatrix,
-			Capella: &builderCapella.SubmitBlockRequest{
-				Message: &v1.BidTrace{
-					Slot:                 originalPayloadMessage.Slot,
-					ParentHash:           originalPayloadMessage.ParentHash,
-					BlockHash:            originalPayloadMessage.BlockHash,
-					BuilderPubkey:        originalPayloadMessage.BuilderPubkey,
-					ProposerPubkey:       originalPayloadMessage.ProposerPubkey,
-					ProposerFeeRecipient: originalPayloadMessage.ProposerFeeRecipient,
-					GasLimit:             originalPayloadMessage.GasLimit,
-					GasUsed:              originalPayloadMessage.GasUsed,
-					Value:                uint256.NewInt(totalBidValue.Uint64()),
-				},
-				ExecutionPayload: res.assembledPayload,
-				Signature:        payload.Signature(),
-			},
-		}
-
-		submissionEntry, err := api.db.SaveBuilderBlockSubmission(finalBuilderSubmission, res.requestErr, res.validationErr, receivedAt, eligibleAt, true, savePayloadToDatabase, pf, false)
-		if err != nil {
-			log.WithError(err).WithField("payload", payload).Error("saving builder block submission to database failed")
-			return
-		}
-		err = api.db.UpsertBlockBuilderEntryAfterSubmission(submissionEntry, false)
-		if err != nil {
-			log.WithError(err).Error("failed to upsert block-builder-entry")
-		}
-	}()
-
 	tobTxsToSendToAssembler := bellatrix.ExecutionPayloadTransactions{
 		Transactions: []bellatrix2.Transaction{},
 	}
@@ -2127,22 +2127,21 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		log: log,
 		req: &common.BlockAssemblerRequest{
 			TobTxs:             tobTxsToSendToAssembler,
-			RobPayload:         payload,
+			RobPayload:         *payload,
 			RegisteredGasLimit: gasLimit,
 		},
 	}
 
-	log.Info("DEBUG: Block assembly request is ", "req", opts.req)
 	timeBeforeAssembly := time.Now().UTC()
 
 	log = log.WithFields(logrus.Fields{
 		"timestampBeforeAssembly": timeBeforeAssembly.UTC().UnixMilli(),
 	})
 
-	log.Info("DEBUG: Assembling block now!")
 	assembledPayload, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
 	assemblyResultC <- &blockAssemblyResult{
 		assembledPayload: assembledPayload,
+		totalBidValue:    totalBidValue,
 		requestErr:       requestErr,
 		validationErr:    validationErr,
 	}
@@ -2190,7 +2189,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	//
 	// Save to Redis
 	//
-	updateBidResult, err := api.redis.SaveBidAndUpdateTopBid(context.Background(), tx, &bidTrace, payload, getPayloadResponse, getHeaderResponse, receivedAt, isCancellationEnabled, big.NewInt(0))
+	updateBidResult, err := api.redis.SaveBidAndUpdateTopBid(context.Background(), tx, &bidTrace, payload, getPayloadResponse, getHeaderResponse, receivedAt, false, nil)
 	if err != nil {
 		log.WithError(err).Error("could not save bid and update top bids")
 		api.RespondError(w, http.StatusInternalServerError, "failed saving and updating bid")
