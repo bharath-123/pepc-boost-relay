@@ -23,6 +23,7 @@ import (
 	"github.com/NYTimes/gziphandler"
 	builderCapella "github.com/attestantio/go-builder-client/api/capella"
 	"github.com/attestantio/go-eth2-client/api/v1/capella"
+	capella2 "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/buger/jsonparser"
 	common2 "github.com/ethereum/go-ethereum/common"
@@ -165,6 +166,17 @@ type blockSimResult struct {
 	optimisticSubmission bool
 	requestErr           error
 	validationErr        error
+}
+
+type blockAssemblyOptions struct {
+	log *logrus.Entry
+	req *common.BlockAssemblerRequest
+}
+
+type blockAssemblyResult struct {
+	assembledPayload *capella2.ExecutionPayload
+	requestErr       error
+	validationErr    error
 }
 
 // RelayAPI represents a single Relay instance

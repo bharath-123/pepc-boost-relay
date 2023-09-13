@@ -866,3 +866,54 @@ func (t *TobTxsSubmitRequest) UnmarshalJSON(data []byte) error {
 
 	return nil
 }
+
+type BlockAssemblerRequest struct {
+	TobTxs             utilbellatrix.ExecutionPayloadTransactions `json:"tob_txs"`
+	RobPayload         BuilderSubmitBlockRequest                  `json:"rob_payload"`
+	RegisteredGasLimit uint64                                     `json:"registered_gas_limit,string"`
+}
+
+type IntermediateBlockAssemblerRequest struct {
+	TobTxs             []byte `json:"tob_txs"`
+	RobPayload         []byte `json:"rob_payload"`
+	RegisteredGasLimit uint64 `json:"registered_gas_limit,string"`
+}
+
+func (r *BlockAssemblerRequest) MarshalJSON() ([]byte, error) {
+	sszedTobTxs, err := r.TobTxs.MarshalSSZ()
+	if err != nil {
+		return nil, err
+	}
+	encodedRobPayload, err := r.RobPayload.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	intermediateStruct := IntermediateBlockAssemblerRequest{
+		TobTxs:             sszedTobTxs,
+		RobPayload:         encodedRobPayload,
+		RegisteredGasLimit: r.RegisteredGasLimit,
+	}
+
+	return json.Marshal(intermediateStruct)
+}
+
+func (b *BlockAssemblerRequest) UnmarshalJSON(data []byte) error {
+	var intermediateJson IntermediateBlockAssemblerRequest
+	err := json.Unmarshal(data, &intermediateJson)
+	if err != nil {
+		return err
+	}
+	err = b.TobTxs.UnmarshalSSZ(intermediateJson.TobTxs)
+	if err != nil {
+		return err
+	}
+	b.RegisteredGasLimit = intermediateJson.RegisteredGasLimit
+	blockRequest := new(BuilderSubmitBlockRequest)
+	err = json.Unmarshal(intermediateJson.RobPayload, &blockRequest)
+	if err != nil {
+		return err
+	}
+	b.RobPayload = *blockRequest
+
+	return nil
+}
