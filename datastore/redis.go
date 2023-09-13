@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,6 +84,10 @@ type RedisCache struct {
 	client         *redis.Client
 	readonlyClient *redis.Client
 
+	// TOB tx prefixes
+	prefixTopTobTxValue string
+	prefixTobTobTx      string
+
 	// prefixes (keys generated with a function)
 	prefixGetHeaderResponse           string
 	prefixExecPayloadCapella          string
@@ -123,6 +128,9 @@ func NewRedisCache(prefix, redisURI, readonlyURI string) (*RedisCache, error) {
 		client:         client,
 		readonlyClient: roClient,
 
+		prefixTobTobTx:      fmt.Sprintf("%s/%s:cache-tobtobtx", redisPrefix, prefix),
+		prefixTopTobTxValue: fmt.Sprintf("%s/%s:cache-toptobtx-value", redisPrefix, prefix),
+
 		prefixGetHeaderResponse:  fmt.Sprintf("%s/%s:cache-gethead-response", redisPrefix, prefix),
 		prefixExecPayloadCapella: fmt.Sprintf("%s/%s:cache-execpayload-capella", redisPrefix, prefix),
 		prefixBidTrace:           fmt.Sprintf("%s/%s:cache-bid-trace", redisPrefix, prefix),
@@ -143,6 +151,14 @@ func NewRedisCache(prefix, redisURI, readonlyURI string) (*RedisCache, error) {
 		keyLastSlotDelivered:  fmt.Sprintf("%s/%s:last-slot-delivered", redisPrefix, prefix),
 		keyLastHashDelivered:  fmt.Sprintf("%s/%s:last-hash-delivered", redisPrefix, prefix),
 	}, nil
+}
+
+func (r *RedisCache) keyCacheGetTobTxs(slot uint64, parentHash string) string {
+	return fmt.Sprintf("%s:%d-%s", r.prefixTobTobTx, slot, parentHash)
+}
+
+func (r *RedisCache) keyCacheGetTobTxsValue(slot uint64, parentHash string) string {
+	return fmt.Sprintf("%s:%d-%s", r.prefixTopTobTxValue, slot, parentHash)
 }
 
 func (r *RedisCache) keyCacheGetHeaderResponse(slot uint64, parentHash, proposerPubkey string) string {
@@ -356,6 +372,77 @@ func (r *RedisCache) GetBestBid(slot uint64, parentHash, proposerPubkey string) 
 		return nil, nil
 	}
 	return resp, err
+}
+
+func (r *RedisCache) SetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string, txs [][]byte) error {
+	key := r.keyCacheGetTobTxs(slot, parentHash)
+	finalTxStrings := []string{}
+	for _, tx := range txs {
+		finalTxStrings = append(finalTxStrings, hex.EncodeToString(tx))
+	}
+	finalTxString := strings.Join(finalTxStrings, ",")
+
+	err := tx.Set(ctx, key, finalTxString, expiryBidCache).Err()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx)
+	return err
+}
+
+func (r *RedisCache) GetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string) ([][]byte, error) {
+	key := r.keyCacheGetTobTxs(slot, parentHash)
+	resp := make([][]byte, 0)
+	c := tx.Get(ctx, key)
+	_, err := tx.Exec(ctx)
+	if errors.Is(err, redis.Nil) {
+		return resp, nil
+	} else if err != nil {
+		return resp, err
+	}
+	tobTxs, err := c.Result()
+	if err != nil {
+		return resp, err
+	}
+	tobTxStrings := strings.Split(tobTxs, ",")
+	for _, tobTxString := range tobTxStrings {
+		tobTx, err := hex.DecodeString(tobTxString)
+		if err != nil {
+			return resp, err
+		}
+		resp = append(resp, tobTx)
+	}
+
+	return resp, err
+}
+
+func (r *RedisCache) SetTobTxValue(ctx context.Context, tx redis.Pipeliner, value *big.Int, slot uint64, parentHash string) (err error) {
+	key := r.keyCacheGetTobTxsValue(slot, parentHash)
+	err = tx.Set(ctx, key, value.String(), expiryBidCache).Err()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx)
+	return err
+}
+
+func (r *RedisCache) GetTobTxValue(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string) (tobTxValue *big.Int, err error) {
+	keyTobTxValue := r.keyCacheGetTobTxsValue(slot, parentHash)
+	c := tx.Get(ctx, keyTobTxValue)
+	_, err = tx.Exec(ctx)
+	if errors.Is(err, redis.Nil) {
+		return big.NewInt(0), nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	tobTxValueStr, err := c.Result()
+	if err != nil {
+		return nil, err
+	}
+	tobTxValue = new(big.Int)
+	tobTxValue.SetString(tobTxValueStr, 10)
+	return tobTxValue, nil
 }
 
 func (r *RedisCache) SaveExecutionPayloadCapella(ctx context.Context, tx redis.Pipeliner, slot uint64, proposerPubkey, blockHash string, execPayload *capella.ExecutionPayload) (err error) {
