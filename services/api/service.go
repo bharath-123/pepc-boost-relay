@@ -2011,6 +2011,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	if err != nil {
 		log.WithError(err).Error("failed to get tob txs from redis")
 		api.RespondError(w, http.StatusInternalServerError, "failed to get tob txs from redis")
+		return
 	}
 	// if there are no TOB txs then the ROB block is the final block
 	totalBidValue := payload.Value()
@@ -2020,6 +2021,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		if err != nil {
 			log.WithError(err).Error("failed to get tob tx value from redis")
 			api.RespondError(w, http.StatusInternalServerError, "failed to get tob tx value from redis")
+			return
 		}
 
 		totalBidValue = new(big.Int).Add(payload.Value(), tobTxValue)
@@ -2029,6 +2031,8 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	topBidValue, err := api.redis.GetTopBidValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
 	if err != nil {
 		log.WithError(err).Error("failed to get top bid value from redis")
+		api.RespondError(w, http.StatusBadRequest, "failed to get top bid value from redis")
+		return
 	} else {
 		bidIsTopBid = totalBidValue.Cmp(topBidValue) == 1
 		log = log.WithFields(logrus.Fields{
