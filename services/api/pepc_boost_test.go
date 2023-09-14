@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	common2 "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	gethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
 	boosttypes "github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/mev-boost-relay/beaconclient"
@@ -1035,4 +1037,176 @@ func TestSubmitTobTxsHappyPath(t *testing.T) {
 	txsPostStoringInRedisHashRoot, err := txsPostStoringInRedis.HashTreeRoot()
 	require.NoError(t, err)
 	require.Equal(t, txsHashRoot, txsPostStoringInRedisHashRoot)
+}
+
+func TestSubmitBuilderBlock(t *testing.T) {
+	submitBlockPath := "/relay/v1/builder/blocks"
+	submitTobTxsPath := "/relay/v1/builder/tob_txs"
+	backend := newTestBackend(t, 1)
+	uniswapV2Address := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+
+	cases := []struct {
+		description   string
+		tobTxs        []*gethtypes.Transaction
+		requiredError string
+	}{
+		{
+			description:   "No ToB txs",
+			tobTxs:        []*gethtypes.Transaction{},
+			requiredError: "",
+		},
+		{
+			description: "ToB txs of some value are present",
+			tobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &uniswapV2Address,
+					Value:    big.NewInt(2),
+					Data:     []byte("tx1"),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			requiredError: "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.description, func(t *testing.T) {
+			backend = newTestBackend(t, 1)
+
+			headSlot := uint64(32)
+			submissionSlot := headSlot + 1
+			submissionTimestamp := 1606824419
+
+			// Payload attributes
+			payloadJSONFilename := "../../testdata/submitBlockPayloadCapella_Goerli.json.gz"
+			parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+			feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
+			require.NoError(t, err)
+			withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
+			require.NoError(t, err)
+			prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+
+			// Setup the test relay backend
+			backend.relay.headSlot.Store(headSlot)
+			backend.relay.capellaEpoch = 1
+			backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+			backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+				Slot: headSlot,
+				Entry: &types.SignedValidatorRegistration{
+					Message: &types.RegisterValidatorRequestMessage{
+						FeeRecipient: feeRec,
+					},
+				},
+			}
+			backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+			backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+				slot:       submissionSlot,
+				parentHash: parentHash,
+				payloadAttributes: beaconclient.PayloadAttributes{
+					PrevRandao: prevRandao,
+				},
+				withdrawalsRoot: phase0.Root(withdrawalsRoot),
+			}
+			backend.relay.blockAssembler = &MockBlockAssembler{
+				assemblerError: nil,
+			}
+
+			// create the ToB txs
+			tobTxsValue := big.NewInt(0)
+			if len(c.tobTxs) > 0 {
+				req := new(common.TobTxsSubmitRequest)
+				txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
+				require.NoError(t, err)
+				for _, tx := range c.tobTxs {
+					txBytes, err := tx.MarshalBinary()
+					require.NoError(t, err)
+					txs.Transactions = append(txs.Transactions, txBytes)
+				}
+				txsHashRoot, err := txs.HashTreeRoot()
+				req = &common.TobTxsSubmitRequest{
+					ParentHash: parentHash,
+					TobTxs:     txs,
+					Slot:       headSlot + 1,
+				}
+				jsonReq, err := req.MarshalJSON()
+				require.NoError(t, err)
+
+				rr := backend.requestBytes(http.MethodPost, submitTobTxsPath, jsonReq, map[string]string{
+					"Content-Type": "application/json",
+				})
+				require.Equal(t, http.StatusOK, rr.Code)
+
+				tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
+				require.NoError(t, err)
+				payoutTxs := c.tobTxs[len(c.tobTxs)-1]
+				require.Equal(t, tobTxValue, payoutTxs.Value())
+				tobTxsValue = payoutTxs.Value()
+
+				tobTxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
+				require.NoError(t, err)
+				require.Equal(t, len(c.tobTxs), len(tobTxs))
+				txOutOfRedis := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
+				for _, tx := range tobTxs {
+					txOutOfRedis.Transactions = append(txOutOfRedis.Transactions, tx)
+				}
+				txsOutOfRedisHash, err := txOutOfRedis.HashTreeRoot()
+				require.NoError(t, err)
+				require.Equal(t, txsHashRoot, txsOutOfRedisHash)
+			}
+
+			// Prepare the request payload
+			req := new(common.BuilderSubmitBlockRequest)
+			requestPayloadJSONBytes := common.LoadGzippedBytes(t, payloadJSONFilename)
+			require.NoError(t, err)
+			err = json.Unmarshal(requestPayloadJSONBytes, &req)
+			require.NoError(t, err)
+
+			// Update
+			req.Capella.Message.Slot = submissionSlot
+			req.Capella.ExecutionPayload.Timestamp = uint64(submissionTimestamp)
+			fmt.Printf("DEBUG: payload value is %d\n", req.Value())
+			// create valid builder keypairs
+			// TODO - store a valid payload in testdata
+			secretKey, publicKey, err := bls.GenerateNewKeypair()
+			require.NoError(t, err)
+			pKey, err := boosttypes.BlsPublicKeyToPublicKey(publicKey)
+			require.NoError(t, err)
+			req.Capella.Message.BuilderPubkey = phase0.BLSPubKey(pKey)
+			// sign the payload with the builder keypair
+			signature, err := boosttypes.SignMessage(req.Message(), backend.relay.opts.EthNetDetails.DomainBuilder, secretKey)
+			require.NoError(t, err)
+			req.Capella.Signature = phase0.BLSSignature(signature)
+			totalExpectedBidValue := big.NewInt(0).Add(req.Message().Value.ToBig(), tobTxsValue)
+
+			// Send JSON encoded request
+			reqJSONBytes, err := req.Capella.MarshalJSON()
+			require.NoError(t, err)
+			require.Equal(t, 704810, len(reqJSONBytes))
+			reqJSONBytes2, err := json.Marshal(req.Capella)
+			require.NoError(t, err)
+			require.Equal(t, reqJSONBytes, reqJSONBytes2)
+			rr := backend.requestBytes(http.MethodPost, submitBlockPath, reqJSONBytes, nil)
+			if c.requiredError != "" {
+				require.Contains(t, rr.Body.String(), c.requiredError)
+			} else {
+				require.Equal(t, http.StatusOK, rr.Code)
+			}
+			// get the block stored in the db
+			topBid, err := backend.redis.GetBestBid(headSlot+1, parentHash, req.ProposerPubkey())
+			fmt.Printf("DEBUG: topBid value is %d\n", topBid.Value().Int64())
+			fmt.Printf("DEBUG: totalExpectedBidValue is %d\n", totalExpectedBidValue.Int64())
+			require.NoError(t, err)
+			require.Equal(t, totalExpectedBidValue, topBid.Value())
+		})
+	}
 }
