@@ -1208,8 +1208,29 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			bestBid, err := backend.redis.GetBestBid(headSlot+1, parentHash, req.ProposerPubkey())
 			require.NoError(t, err)
 			require.Equal(t, totalExpectedBidValue, bestBid.Value())
-			_, err = backend.redis.GetExecutionPayloadCapella(headSlot+1, req.ProposerPubkey(), req.BlockHash())
+			value, err := backend.redis.GetBuilderLatestValue(headSlot+1, req.ParentHash(), req.ProposerPubkey(), req.BuilderPubkey().String())
 			require.NoError(t, err)
+			require.Equal(t, totalExpectedBidValue, value)
+			payload, err := backend.redis.GetExecutionPayloadCapella(headSlot+1, req.ProposerPubkey(), req.BlockHash())
+			require.NoError(t, err)
+			require.Equal(t, req.NumTx()+len(c.tobTxs), payload.NumTx())
+			payloadTxs := payload.Capella.Capella.Transactions
+			tobTxs := payloadTxs[:len(c.tobTxs)]
+			robTxs := payloadTxs[len(c.tobTxs):]
+			for i, tobtx := range tobTxs {
+				expectedTobTx := c.tobTxs[i]
+				expectedTobTxBinary, err := expectedTobTx.MarshalBinary()
+
+				require.NoError(t, err)
+				require.Equal(t, bellatrix.Transaction(expectedTobTxBinary), tobtx)
+			}
+			for i, robtx := range robTxs {
+				expectedRobTx := req.Capella.ExecutionPayload.Transactions[i]
+				require.Equal(t, expectedRobTx, robtx)
+			}
+			bid, err := backend.redis.GetBidTrace(headSlot+1, req.ProposerPubkey(), req.BlockHash())
+			require.NoError(t, err)
+			require.Equal(t, bid.Value, totalExpectedBidValue)
 		})
 	}
 }
