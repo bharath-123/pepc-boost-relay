@@ -2162,9 +2162,9 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 
 	// This will be the assembled payload
 	bidTrace := common.BidTraceV2{
-		BidTrace:    *payload.Message(),
-		BlockNumber: payload.BlockNumber(),
-		NumTx:       uint64(payload.NumTx()),
+		BidTrace:    *assembledBuilderSubmission.Message(),
+		BlockNumber: assembledBuilderSubmission.BlockNumber(),
+		NumTx:       uint64(assembledBuilderSubmission.NumTx()),
 	}
 
 	//
