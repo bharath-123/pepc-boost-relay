@@ -1771,7 +1771,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(txs) == 1 {
+	if len(txs) < 2 {
 		log.Error("We require a payment tx along with the TOB txs!")
 		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
 		return
