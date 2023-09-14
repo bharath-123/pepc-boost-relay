@@ -1762,6 +1762,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	if slot-headSlot > 1 {
 		log.Error("Slot's TOB bid not yet started!!")
 		api.Respond(w, http.StatusBadRequest, "Slot's TOB bid not yet started!!")
+		return
 	}
 
 	// decode the txs
