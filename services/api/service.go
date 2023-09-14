@@ -1738,12 +1738,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 
 	lastTx := txs[len(txs)-1]
 
-	err = api.checkTobTxsStateInterference(txs)
-	if err != nil {
-		log.WithError(err).Warn("could not validate tob txs")
-		api.RespondError(w, http.StatusInternalServerError, err.Error())
-	}
-
 	tx := api.redis.NewTxPipeline()
 
 	tobTxValue := lastTx.Value()
