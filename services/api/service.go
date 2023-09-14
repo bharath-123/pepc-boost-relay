@@ -1626,9 +1626,7 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction) erro
 // This method first checks whether the payouts are valid, then checks whether the txs are valid w.r.t state interference
 func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction) error {
 	// TODO - Payouts still need to be modelled
-	// TODO - check all the txs to see if the nonce is valid, value is valid, check if the tx has already been included. These can be confirmed from the
-	// execution layer. We should ideally
-	// TODO - expand state interference checks as in checkTobTxsStateInterference
+	// TODO - expand state interference checks as in checkTobTxsStateInterference using call tracing
 
 	if len(txs) == 0 {
 		return fmt.Errorf("Empty TOB tx request sent!")
