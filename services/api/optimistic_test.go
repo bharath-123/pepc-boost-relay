@@ -303,6 +303,7 @@ func TestPrepareBuildersForSlot(t *testing.T) {
 	require.Zero(t, entry.collateral.Cmp(big.NewInt(int64(collateral))))
 }
 
+// TODO - bchain these tests fail when we don't consider cancellations. debug them
 //
 //func TestBuilderApiSubmitNewBlockOptimistic(t *testing.T) {
 //	testCases := []struct {
