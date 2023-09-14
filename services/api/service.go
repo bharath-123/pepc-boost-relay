@@ -1610,8 +1610,6 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction) erro
 		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
 	}
 
-	// TODO - check if nonce is valid
-	// TODO - check if tx has already been included in a block
 	firstTx := txs[0]
 	if firstTx.To() == nil {
 		return fmt.Errorf("contract creation cannot be a TOB tx")
@@ -1625,19 +1623,16 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction) erro
 	return nil
 }
 
-// This method checks the following:
-// 1. If the tx has already been included in a block
-// 2. If the user sending the tx has enough balance to pay for the tx
-// 3. If the sender nonce is valid
-// 4. Checks if the final tx is a validator payout
+// This method first checks whether the payouts are valid, then checks whether the txs are valid w.r.t state interference
 func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *logrus.Entry) error {
-	// TODO - ALL PAYOUT RELATED THINGS!
-	// TODO - Finish the payout tx validation like check the sender account balance. We don't have to validate the builder payout txs. The onus of
-	// it falls on the builder
-	// TODO - we need to add a new tx to the TOB txs which sends the payout from the relayer to the validator and the builder. Pick this up once other things are done
+	// TODO - Payouts still need to be modelled
 	// TODO - check all the txs to see if the nonce is valid, value is valid, check if the tx has already been included. These can be confirmed from the
 	// execution layer. We should ideally
-	// TODO - Add state interference checks as in checkTobTxsStateInterference
+	// TODO - expand state interference checks as in checkTobTxsStateInterference
+
+	if len(txs) < 2 {
+		return fmt.Errorf("We require a payment tx along with the TOB txs!")
+	}
 
 	// Start: Payout checks
 	lastTx := txs[len(txs)-1]
@@ -1659,11 +1654,8 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *log
 }
 
 func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Request) {
-	//var pf common.Profile
-	//var prevTime, nextTime time.Time
 	headSlot := api.headSlot.Load()
 	receivedAt := time.Now().UTC()
-	//prevTime = receivedAt
 
 	log := api.log.WithFields(logrus.Fields{
 		"method":                "submitTobTxs",
@@ -1736,26 +1728,15 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(txs) == 1 {
-		log.Error("We require a payment tx along with the TOB txs!")
-		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
-		return
-	}
 
 	err = api.checkTxAndSenderValidity(txs, log)
 	if err != nil {
-		log.WithError(err).Warn("error validating the txs")
+		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	lastTx := txs[len(txs)-1]
-
-	err = api.checkTobTxsStateInterference(txs)
-	if err != nil {
-		log.WithError(err).Warn("could not validate tob txs")
-		api.RespondError(w, http.StatusInternalServerError, err.Error())
-	}
 
 	tx := api.redis.NewTxPipeline()
 
