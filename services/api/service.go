@@ -1630,8 +1630,11 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *log
 	// execution layer. We should ideally
 	// TODO - expand state interference checks as in checkTobTxsStateInterference
 
-	if len(txs) < 2 {
-		return fmt.Errorf("We require a payment tx along with the TOB txs!")
+	if len(txs) == 0 {
+		return fmt.Errorf("empty txs sent!")
+	}
+	if len(txs) == 1 {
+		return fmt.Errorf("we require a payment tx along with the TOB txs")
 	}
 
 	// Start: Payout checks
