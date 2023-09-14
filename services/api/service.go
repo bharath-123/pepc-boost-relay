@@ -178,7 +178,7 @@ type blockAssemblyOptions struct {
 }
 
 type blockAssemblyResult struct {
-	assembledPayload *capella2.ExecutionPayload
+	assembledPayload *common.BuilderSubmitBlockRequest
 	requestErr       error
 	validationErr    error
 }
@@ -2065,28 +2065,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 			}
 		}
 
-		// building the final aggregated payload
-		originalPayloadMessage := payload.Message()
-		finalBuilderSubmission := &common.BuilderSubmitBlockRequest{
-			Bellatrix: payload.Bellatrix,
-			Capella: &builderCapella.SubmitBlockRequest{
-				Message: &v1.BidTrace{
-					Slot:                 originalPayloadMessage.Slot,
-					ParentHash:           originalPayloadMessage.ParentHash,
-					BlockHash:            originalPayloadMessage.BlockHash,
-					BuilderPubkey:        originalPayloadMessage.BuilderPubkey,
-					ProposerPubkey:       originalPayloadMessage.ProposerPubkey,
-					ProposerFeeRecipient: originalPayloadMessage.ProposerFeeRecipient,
-					GasLimit:             originalPayloadMessage.GasLimit,
-					GasUsed:              originalPayloadMessage.GasUsed,
-					Value:                uint256.NewInt(totalBidValue.Uint64()),
-				},
-				ExecutionPayload: res.assembledPayload,
-				Signature:        payload.Signature(),
-			},
-		}
-
-		submissionEntry, err := api.db.SaveBuilderBlockSubmission(finalBuilderSubmission, res.requestErr, res.validationErr, receivedAt, eligibleAt, true, savePayloadToDatabase, pf, false)
+		submissionEntry, err := api.db.SaveBuilderBlockSubmission(res.assembledPayload, res.requestErr, res.validationErr, receivedAt, eligibleAt, true, savePayloadToDatabase, pf, false)
 		if err != nil {
 			log.WithError(err).WithField("payload", payload).Error("saving builder block submission to database failed")
 			return
@@ -2121,8 +2100,29 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	})
 
 	assembledPayload, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
+	assembledBuilderSubmission := &common.BuilderSubmitBlockRequest{
+		Bellatrix: payload.Bellatrix,
+		Capella: &builderCapella.SubmitBlockRequest{
+			Message: &v1.BidTrace{
+				Slot:                 payload.Message().Slot,
+				ParentHash:           payload.Message().ParentHash,
+				BlockHash:            payload.Message().BlockHash,
+				BuilderPubkey:        payload.Message().BuilderPubkey,
+				ProposerPubkey:       payload.Message().ProposerPubkey,
+				ProposerFeeRecipient: payload.Message().ProposerFeeRecipient,
+				GasLimit:             payload.Message().GasLimit,
+				GasUsed:              payload.Message().GasUsed,
+				Value:                uint256.NewInt(totalBidValue.Uint64()),
+			},
+			ExecutionPayload: assembledPayload,
+			// TODO - This signature will be invalid and we can't get the valid one since we need the builder private key
+			// we could use a set of keys from relayer to sign the message. This is a TODO for now because this signature
+			// is not being checked anywhere once the bid is stored in the db
+			Signature: payload.Signature(),
+		},
+	}
 	assemblyResultC <- &blockAssemblyResult{
-		assembledPayload: assembledPayload,
+		assembledPayload: assembledBuilderSubmission,
 		requestErr:       requestErr,
 		validationErr:    validationErr,
 	}
@@ -2146,14 +2146,14 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	}
 
 	// Prepare the response data
-	getHeaderResponse, err := common.BuildGetHeaderResponse(payload, api.blsSk, api.publicKey, api.opts.EthNetDetails.DomainBuilder)
+	getHeaderResponse, err := common.BuildGetHeaderResponse(assembledBuilderSubmission, api.blsSk, api.publicKey, api.opts.EthNetDetails.DomainBuilder)
 	if err != nil {
 		log.WithError(err).Error("could not sign builder bid")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	getPayloadResponse, err := common.BuildGetPayloadResponse(payload)
+	getPayloadResponse, err := common.BuildGetPayloadResponse(assembledBuilderSubmission)
 	if err != nil {
 		log.WithError(err).Error("could not build getPayload response")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
@@ -2170,7 +2170,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	//
 	// Save to Redis
 	//
-	updateBidResult, err := api.redis.SaveBidAndUpdateTopBid(context.Background(), tx, &bidTrace, payload, getPayloadResponse, getHeaderResponse, receivedAt, false, nil, tobTxValue)
+	updateBidResult, err := api.redis.SaveBidAndUpdateTopBid(context.Background(), tx, &bidTrace, assembledBuilderSubmission, getPayloadResponse, getHeaderResponse, receivedAt, false, nil)
 	if err != nil {
 		log.WithError(err).Error("could not save bid and update top bids")
 		api.RespondError(w, http.StatusInternalServerError, "failed saving and updating bid")

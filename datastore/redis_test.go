@@ -245,7 +245,7 @@ func TestBuilderBids(t *testing.T) {
 
 	// submit ba1=10
 	payload, getPayloadResp, getHeaderResp := common.CreateTestBlockSubmission(t, bApubkey, big.NewInt(10), &opts)
-	resp, err := cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), false, nil, big.NewInt(0))
+	resp, err := cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), false, nil)
 	require.NoError(t, err)
 	require.True(t, resp.WasBidSaved, resp)
 	require.True(t, resp.WasTopBidUpdated)
@@ -264,7 +264,7 @@ func TestBuilderBids(t *testing.T) {
 
 	// submit ba2=5 (should not update, because floor is 10)
 	payload, getPayloadResp, getHeaderResp = common.CreateTestBlockSubmission(t, bApubkey, big.NewInt(5), &opts)
-	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), false, nil, big.NewInt(0))
+	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), false, nil)
 	require.NoError(t, err)
 	require.False(t, resp.WasBidSaved, resp)
 	require.False(t, resp.WasTopBidUpdated)
@@ -275,7 +275,7 @@ func TestBuilderBids(t *testing.T) {
 
 	// submit ba3c=5 (should not update, because floor is 10)
 	payload, getPayloadResp, getHeaderResp = common.CreateTestBlockSubmission(t, bApubkey, big.NewInt(5), &opts)
-	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), true, nil, big.NewInt(0))
+	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), true, nil)
 	require.NoError(t, err)
 	require.True(t, resp.WasBidSaved)
 	require.False(t, resp.WasTopBidUpdated)
@@ -287,7 +287,7 @@ func TestBuilderBids(t *testing.T) {
 
 	// submit bb1=20
 	payload, getPayloadResp, getHeaderResp = common.CreateTestBlockSubmission(t, bBpubkey, big.NewInt(20), &opts)
-	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), false, nil, big.NewInt(0))
+	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), false, nil)
 	require.NoError(t, err)
 	require.True(t, resp.WasBidSaved)
 	require.True(t, resp.WasTopBidUpdated)
@@ -298,7 +298,7 @@ func TestBuilderBids(t *testing.T) {
 
 	// submit bb2c=22
 	payload, getPayloadResp, getHeaderResp = common.CreateTestBlockSubmission(t, bBpubkey, big.NewInt(22), &opts)
-	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), true, nil, big.NewInt(0))
+	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), true, nil)
 	require.NoError(t, err)
 	require.True(t, resp.WasBidSaved)
 	require.True(t, resp.WasTopBidUpdated)
@@ -309,7 +309,7 @@ func TestBuilderBids(t *testing.T) {
 
 	// submit bb3c=12 (should update top bid, using floor at 20)
 	payload, getPayloadResp, getHeaderResp = common.CreateTestBlockSubmission(t, bBpubkey, big.NewInt(12), &opts)
-	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), true, nil, big.NewInt(0))
+	resp, err = cache.SaveBidAndUpdateTopBid(context.Background(), cache.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), true, nil)
 	require.NoError(t, err)
 	require.True(t, resp.WasBidSaved)
 	require.True(t, resp.WasTopBidUpdated)
