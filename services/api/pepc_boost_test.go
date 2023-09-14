@@ -1202,11 +1202,12 @@ func TestSubmitBuilderBlock(t *testing.T) {
 				require.Equal(t, http.StatusOK, rr.Code)
 			}
 			// get the block stored in the db
-			topBid, err := backend.redis.GetBestBid(headSlot+1, parentHash, req.ProposerPubkey())
-			fmt.Printf("DEBUG: topBid value is %d\n", topBid.Value().Int64())
+			txPipeliner := backend.redis.NewPipeline()
+			topBid, err := backend.redis.GetTopBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, req.ProposerPubkey())
+			fmt.Printf("DEBUG: topBid value is %d\n", topBid.Int64())
 			fmt.Printf("DEBUG: totalExpectedBidValue is %d\n", totalExpectedBidValue.Int64())
 			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, topBid.Value())
+			require.Equal(t, totalExpectedBidValue, topBid)
 		})
 	}
 }
