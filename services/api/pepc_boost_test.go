@@ -654,6 +654,66 @@ func TestSubmitTobTxs(t *testing.T) {
 	}
 }
 
+func assertBlock(t *testing.T, backend *testBackend, headSlot uint64, parentHash string, blockSubmitReq *common.BuilderSubmitBlockRequest, totalExpectedBidValue *big.Int, tobTxs []*gethtypes.Transaction) {
+	txPipeliner := backend.redis.NewPipeline()
+	topBidValue, err := backend.redis.GetTopBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, blockSubmitReq.ProposerPubkey())
+	require.NoError(t, err)
+	require.Equal(t, totalExpectedBidValue, topBidValue)
+	bestBid, err := backend.redis.GetBestBid(headSlot+1, parentHash, blockSubmitReq.ProposerPubkey())
+	require.NoError(t, err)
+	require.Equal(t, totalExpectedBidValue, bestBid.Value())
+	value, err := backend.redis.GetBuilderLatestValue(headSlot+1, blockSubmitReq.ParentHash(), blockSubmitReq.ProposerPubkey(), blockSubmitReq.BuilderPubkey().String())
+	require.NoError(t, err)
+	require.Equal(t, totalExpectedBidValue, value)
+	payload, err := backend.redis.GetExecutionPayloadCapella(headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
+	require.NoError(t, err)
+	require.Equal(t, blockSubmitReq.NumTx()+len(tobTxs), payload.NumTx())
+	payloadTxs := payload.Capella.Capella.Transactions
+	payloadTobTxs := payloadTxs[:len(tobTxs)]
+	payloadRobTxs := payloadTxs[len(tobTxs):]
+	for i, tobtx := range payloadTobTxs {
+		expectedTobTx := tobTxs[i]
+		expectedTobTxBinary, err := expectedTobTx.MarshalBinary()
+
+		require.NoError(t, err)
+		require.Equal(t, bellatrix.Transaction(expectedTobTxBinary), tobtx)
+	}
+	for i, robtx := range payloadRobTxs {
+		expectedRobTx := blockSubmitReq.Capella.ExecutionPayload.Transactions[i]
+		require.Equal(t, expectedRobTx, robtx)
+	}
+	bid, err := backend.redis.GetBidTrace(headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
+	require.NoError(t, err)
+	require.Equal(t, bid.Value.ToBig(), totalExpectedBidValue)
+	require.Equal(t, bid.Slot, headSlot+1)
+	require.Equal(t, int(bid.NumTx), blockSubmitReq.NumTx()+len(tobTxs))
+	floorBid, err := backend.redis.GetFloorBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, blockSubmitReq.ProposerPubkey())
+	require.NoError(t, err)
+	require.Equal(t, floorBid, totalExpectedBidValue)
+	blockSubmissionEntry, err := backend.relay.db.GetBlockSubmissionEntry(headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
+	require.NoError(t, err)
+	blockSubmissionValue, ok := new(big.Int).SetString(blockSubmissionEntry.Value, 10)
+	require.True(t, ok)
+	require.Equal(t, totalExpectedBidValue, blockSubmissionValue)
+	dbPayload, err := backend.datastore.GetGetPayloadResponse(common.TestLog, headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
+	require.NoError(t, err)
+	require.Equal(t, blockSubmitReq.NumTx()+len(tobTxs), dbPayload.NumTx())
+	payloadTxs = dbPayload.Capella.Capella.Transactions
+	payloadTobTxs = payloadTxs[:len(tobTxs)]
+	payloadRobTxs = payloadTxs[len(tobTxs):]
+	for i, tobtx := range payloadTobTxs {
+		expectedTobTx := tobTxs[i]
+		expectedTobTxBinary, err := expectedTobTx.MarshalBinary()
+
+		require.NoError(t, err)
+		require.Equal(t, bellatrix.Transaction(expectedTobTxBinary), tobtx)
+	}
+	for i, robtx := range payloadRobTxs {
+		expectedRobTx := blockSubmitReq.Capella.ExecutionPayload.Transactions[i]
+		require.Equal(t, expectedRobTx, robtx)
+	}
+}
+
 func TestSubmitBuilderBlockInSequence(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
@@ -809,41 +869,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			rr = backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			require.Equal(t, http.StatusOK, rr.Code)
 
-			txPipeliner := backend.redis.NewPipeline()
-			topBidValue, err := backend.redis.GetTopBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, blockSubmitReq.ProposerPubkey())
-			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, topBidValue)
-			bestBid, err := backend.redis.GetBestBid(headSlot+1, parentHash, blockSubmitReq.ProposerPubkey())
-			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, bestBid.Value())
-			value, err := backend.redis.GetBuilderLatestValue(headSlot+1, blockSubmitReq.ParentHash(), blockSubmitReq.ProposerPubkey(), blockSubmitReq.BuilderPubkey().String())
-			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, value)
-			payload, err := backend.redis.GetExecutionPayloadCapella(headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
-			require.NoError(t, err)
-			require.Equal(t, blockSubmitReq.NumTx()+len(c.firstTobTxs), payload.NumTx())
-			payloadTxs := payload.Capella.Capella.Transactions
-			payloadTobTxs := payloadTxs[:len(c.firstTobTxs)]
-			payloadRobTxs := payloadTxs[len(c.firstTobTxs):]
-			for i, tobtx := range payloadTobTxs {
-				expectedTobTx := c.firstTobTxs[i]
-				expectedTobTxBinary, err := expectedTobTx.MarshalBinary()
-
-				require.NoError(t, err)
-				require.Equal(t, bellatrix.Transaction(expectedTobTxBinary), tobtx)
-			}
-			for i, robtx := range payloadRobTxs {
-				expectedRobTx := blockSubmitReq.Capella.ExecutionPayload.Transactions[i]
-				require.Equal(t, expectedRobTx, robtx)
-			}
-			bid, err := backend.redis.GetBidTrace(headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
-			require.NoError(t, err)
-			require.Equal(t, bid.Value.ToBig(), totalExpectedBidValue)
-			require.Equal(t, bid.Slot, headSlot+1)
-			require.Equal(t, int(bid.NumTx), blockSubmitReq.NumTx()+len(c.firstTobTxs))
-			floorBid, err := backend.redis.GetFloorBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, blockSubmitReq.ProposerPubkey())
-			require.NoError(t, err)
-			require.Equal(t, floorBid, totalExpectedBidValue)
+			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq, totalExpectedBidValue, c.firstTobTxs)
 
 			// submit the second set of ToB txs
 			txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
@@ -893,63 +919,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			rr = backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			require.Equal(t, http.StatusOK, rr.Code)
 
-			txPipeliner = backend.redis.NewPipeline()
-			topBidValue, err = backend.redis.GetTopBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, blockSubmitReq.ProposerPubkey())
-			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, topBidValue)
-			bestBid, err = backend.redis.GetBestBid(headSlot+1, parentHash, blockSubmitReq.ProposerPubkey())
-			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, bestBid.Value())
-			value, err = backend.redis.GetBuilderLatestValue(headSlot+1, blockSubmitReq.ParentHash(), blockSubmitReq.ProposerPubkey(), blockSubmitReq.BuilderPubkey().String())
-			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, value)
-			payload, err = backend.redis.GetExecutionPayloadCapella(headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
-			require.NoError(t, err)
-			require.Equal(t, blockSubmitReq.NumTx()+len(c.secondTobTxs), payload.NumTx())
-			payloadTxs = payload.Capella.Capella.Transactions
-			payloadTobTxs = payloadTxs[:len(c.secondTobTxs)]
-			payloadRobTxs = payloadTxs[len(c.secondTobTxs):]
-			for i, tobtx := range payloadTobTxs {
-				expectedTobTx := c.secondTobTxs[i]
-				expectedTobTxBinary, err := expectedTobTx.MarshalBinary()
-
-				require.NoError(t, err)
-				require.Equal(t, bellatrix.Transaction(expectedTobTxBinary), tobtx)
-			}
-			for i, robtx := range payloadRobTxs {
-				expectedRobTx := blockSubmitReq.Capella.ExecutionPayload.Transactions[i]
-				require.Equal(t, expectedRobTx, robtx)
-			}
-			bid, err = backend.redis.GetBidTrace(headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
-			require.NoError(t, err)
-			require.Equal(t, bid.Value.ToBig(), totalExpectedBidValue)
-			require.Equal(t, bid.Slot, headSlot+1)
-			require.Equal(t, int(bid.NumTx), blockSubmitReq.NumTx()+len(c.secondTobTxs))
-			floorBid, err = backend.redis.GetFloorBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, blockSubmitReq.ProposerPubkey())
-			require.NoError(t, err)
-			require.Equal(t, floorBid, totalExpectedBidValue)
-			blockSubmissionEntry, err := backend.relay.db.GetBlockSubmissionEntry(headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
-			require.NoError(t, err)
-			blockSubmissionValue, ok := new(big.Int).SetString(blockSubmissionEntry.Value, 10)
-			require.True(t, ok)
-			require.Equal(t, totalExpectedBidValue, blockSubmissionValue)
-			dbPayload, err := backend.datastore.GetGetPayloadResponse(common.TestLog, headSlot+1, blockSubmitReq.ProposerPubkey(), blockSubmitReq.BlockHash())
-			require.NoError(t, err)
-			require.Equal(t, blockSubmitReq.NumTx()+len(c.secondTobTxs), dbPayload.NumTx())
-			payloadTxs = dbPayload.Capella.Capella.Transactions
-			payloadTobTxs = payloadTxs[:len(c.secondTobTxs)]
-			payloadRobTxs = payloadTxs[len(c.secondTobTxs):]
-			for i, tobtx := range payloadTobTxs {
-				expectedTobTx := c.secondTobTxs[i]
-				expectedTobTxBinary, err := expectedTobTx.MarshalBinary()
-
-				require.NoError(t, err)
-				require.Equal(t, bellatrix.Transaction(expectedTobTxBinary), tobtx)
-			}
-			for i, robtx := range payloadRobTxs {
-				expectedRobTx := blockSubmitReq.Capella.ExecutionPayload.Transactions[i]
-				require.Equal(t, expectedRobTx, robtx)
-			}
+			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq, totalExpectedBidValue, c.secondTobTxs)
 		})
 	}
 
@@ -1059,63 +1029,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 				require.Equal(t, http.StatusOK, rr.Code)
 			}
 			// get the block stored in the db
-			txPipeliner := backend.redis.NewPipeline()
-			topBidValue, err := backend.redis.GetTopBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, req.ProposerPubkey())
-			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, topBidValue)
-			bestBid, err := backend.redis.GetBestBid(headSlot+1, parentHash, req.ProposerPubkey())
-			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, bestBid.Value())
-			value, err := backend.redis.GetBuilderLatestValue(headSlot+1, req.ParentHash(), req.ProposerPubkey(), req.BuilderPubkey().String())
-			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, value)
-			payload, err := backend.redis.GetExecutionPayloadCapella(headSlot+1, req.ProposerPubkey(), req.BlockHash())
-			require.NoError(t, err)
-			require.Equal(t, req.NumTx()+len(c.tobTxs), payload.NumTx())
-			payloadTxs := payload.Capella.Capella.Transactions
-			tobTxs := payloadTxs[:len(c.tobTxs)]
-			robTxs := payloadTxs[len(c.tobTxs):]
-			for i, tobtx := range tobTxs {
-				expectedTobTx := c.tobTxs[i]
-				expectedTobTxBinary, err := expectedTobTx.MarshalBinary()
-
-				require.NoError(t, err)
-				require.Equal(t, bellatrix.Transaction(expectedTobTxBinary), tobtx)
-			}
-			for i, robtx := range robTxs {
-				expectedRobTx := req.Capella.ExecutionPayload.Transactions[i]
-				require.Equal(t, expectedRobTx, robtx)
-			}
-			bid, err := backend.redis.GetBidTrace(headSlot+1, req.ProposerPubkey(), req.BlockHash())
-			require.NoError(t, err)
-			require.Equal(t, bid.Value.ToBig(), totalExpectedBidValue)
-			require.Equal(t, bid.Slot, headSlot+1)
-			require.Equal(t, int(bid.NumTx), req.NumTx()+len(c.tobTxs))
-			floorBid, err := backend.redis.GetFloorBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, req.ProposerPubkey())
-			require.NoError(t, err)
-			require.Equal(t, floorBid, totalExpectedBidValue)
-			blockSubmissionEntry, err := backend.relay.db.GetBlockSubmissionEntry(headSlot+1, req.ProposerPubkey(), req.BlockHash())
-			require.NoError(t, err)
-			blockSubmissionValue, ok := new(big.Int).SetString(blockSubmissionEntry.Value, 10)
-			require.True(t, ok)
-			require.Equal(t, totalExpectedBidValue, blockSubmissionValue)
-			dbPayload, err := backend.datastore.GetGetPayloadResponse(common.TestLog, headSlot+1, req.ProposerPubkey(), req.BlockHash())
-			require.NoError(t, err)
-			require.Equal(t, req.NumTx()+len(c.tobTxs), dbPayload.NumTx())
-			payloadTxs = dbPayload.Capella.Capella.Transactions
-			tobTxs = payloadTxs[:len(c.tobTxs)]
-			robTxs = payloadTxs[len(c.tobTxs):]
-			for i, tobtx := range tobTxs {
-				expectedTobTx := c.tobTxs[i]
-				expectedTobTxBinary, err := expectedTobTx.MarshalBinary()
-
-				require.NoError(t, err)
-				require.Equal(t, bellatrix.Transaction(expectedTobTxBinary), tobtx)
-			}
-			for i, robtx := range robTxs {
-				expectedRobTx := req.Capella.ExecutionPayload.Transactions[i]
-				require.Equal(t, expectedRobTx, robtx)
-			}
+			assertBlock(t, backend, headSlot, parentHash, req, totalExpectedBidValue, c.tobTxs)
 		})
 	}
 }
