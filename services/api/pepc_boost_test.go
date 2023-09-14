@@ -1039,6 +1039,10 @@ func TestSubmitTobTxsHappyPath(t *testing.T) {
 	require.Equal(t, txsHashRoot, txsPostStoringInRedisHashRoot)
 }
 
+func TestSubmitBuilderBlockWithHigherValueSubmitted(t *testing.T) {
+
+}
+
 func TestSubmitBuilderBlock(t *testing.T) {
 	submitBlockPath := "/relay/v1/builder/blocks"
 	submitTobTxsPath := "/relay/v1/builder/tob_txs"
@@ -1233,6 +1237,9 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			require.Equal(t, bid.Value.ToBig(), totalExpectedBidValue)
 			require.Equal(t, bid.Slot, headSlot+1)
 			require.Equal(t, int(bid.NumTx), req.NumTx()+len(c.tobTxs))
+			floorBid, err := backend.redis.GetFloorBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, req.ProposerPubkey())
+			require.NoError(t, err)
+			require.Equal(t, floorBid, totalExpectedBidValue)
 		})
 	}
 }
