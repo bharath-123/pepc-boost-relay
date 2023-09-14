@@ -1670,11 +1670,18 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction) erro
 }
 
 // This method first checks whether the payouts are valid, then checks whether the txs are valid w.r.t state interference
-func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *logrus.Entry) error {
-	// TODO - payouts still need to be modelled
+func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction) error {
+	// TODO - Payouts still need to be modelled
 	// TODO - check all the txs to see if the nonce is valid, value is valid, check if the tx has already been included. These can be confirmed from the
 	// execution layer. We should ideally
-	// TODO - Add state interference checks as mentioned in checkTobTxsStateInterference
+	// TODO - expand state interference checks as in checkTobTxsStateInterference
+
+	if len(txs) == 0 {
+		return fmt.Errorf("Empty TOB tx request sent!")
+	}
+	if len(txs) == 1 {
+		return fmt.Errorf("We require a payment tx along with the TOB txs!")
+	}
 
 	// Start: Payout checks
 	lastTx := txs[len(txs)-1]
@@ -1694,11 +1701,8 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *log
 }
 
 func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Request) {
-	//var pf common.Profile
-	//var prevTime, nextTime time.Time
 	headSlot := api.headSlot.Load()
 	receivedAt := time.Now().UTC()
-	//prevTime = receivedAt
 
 	log := api.log.WithFields(logrus.Fields{
 		"method":                "submitTobTxs",
@@ -1771,15 +1775,10 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(txs) < 2 {
-		log.Error("We require a payment tx along with the TOB txs!")
-		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
-		return
-	}
 
-	err = api.checkTxAndSenderValidity(txs, log)
+	err = api.checkTxAndSenderValidity(txs)
 	if err != nil {
-		log.WithError(err).Warn("error validating the txs")
+		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
