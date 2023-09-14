@@ -22,11 +22,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	uniswapV2Addr   = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+	blockSubmitPath = "/relay/v1/builder/blocks"
+	tobTxSubmitPath = "/relay/v1/builder/tob_txs"
+)
+
 // TODO - this test will keep evolving as we expand the state interference checks
 func TestCheckTxAndSenderValidity(t *testing.T) {
 	_, _, backend := startTestBackend(t)
 	randomAddress := common2.BytesToAddress([]byte("0xabc"))
-	uniswapV2Address := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
 
 	cases := []struct {
 		description   string
@@ -59,7 +64,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Address,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -81,7 +86,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Address,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -103,7 +108,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Address,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -199,7 +204,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Address,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -228,11 +233,40 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 	}
 }
 
+func prepareBackend(backend *testBackend, slot uint64, parentHash string, feeRec types.Address, withdrawalsRoot []byte, prevRandao string, proposerPubkey phase0.BLSPubKey) {
+	headSlot := slot
+	submissionSlot := headSlot + 1
+
+	// Setup the test relay backend
+	backend.relay.headSlot.Store(headSlot)
+	backend.relay.capellaEpoch = 1
+	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+		Slot: headSlot,
+		Entry: &types.SignedValidatorRegistration{
+			Message: &types.RegisterValidatorRequestMessage{
+				Pubkey:       boosttypes.PublicKey(proposerPubkey),
+				FeeRecipient: feeRec,
+			},
+		},
+	}
+	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+		slot:       submissionSlot,
+		parentHash: parentHash,
+		payloadAttributes: beaconclient.PayloadAttributes{
+			PrevRandao: prevRandao,
+		},
+		withdrawalsRoot: phase0.Root(withdrawalsRoot),
+	}
+	backend.relay.blockAssembler = &MockBlockAssembler{
+		assemblerError: nil,
+	}
+}
+
 // tests when tob txs are sent in sequence
 func TestSubmitTobTxsInSequence(t *testing.T) {
-	path := "/relay/v1/builder/tob_txs"
 	backend := newTestBackend(t, 1)
-	addr1 := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
 
 	cases := []struct {
 		description      string
@@ -247,7 +281,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    1,
 					GasPrice: big.NewInt(1),
 					Gas:      1,
-					To:       &addr1,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(1),
 					Data:     []byte("tx1"),
 				}),
@@ -265,7 +299,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &addr1,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx3"),
 				}),
@@ -287,7 +321,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    1,
 					GasPrice: big.NewInt(1),
 					Gas:      1,
-					To:       &addr1,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(1),
 					Data:     []byte("tx1"),
 				}),
@@ -305,7 +339,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &addr1,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx3"),
 				}),
@@ -328,9 +362,6 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			backend := newTestBackend(t, 1)
 
 			headSlot := uint64(32)
-			submissionSlot := headSlot + 1
-
-			// Payload attributes
 			parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
 			feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
 			require.NoError(t, err)
@@ -341,28 +372,8 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			require.NoError(t, err)
 			proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
 
-			// Setup the test relay backend
-			backend.relay.headSlot.Store(headSlot)
-			backend.relay.capellaEpoch = 1
-			backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
-			backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
-				Slot: headSlot,
-				Entry: &types.SignedValidatorRegistration{
-					Message: &types.RegisterValidatorRequestMessage{
-						Pubkey:       boosttypes.PublicKey(proposerPubkey),
-						FeeRecipient: feeRec,
-					},
-				},
-			}
-			backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
-			backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
-				slot:       submissionSlot,
-				parentHash: parentHash,
-				payloadAttributes: beaconclient.PayloadAttributes{
-					PrevRandao: prevRandao,
-				},
-				withdrawalsRoot: phase0.Root(withdrawalsRoot),
-			}
+			prepareBackend(backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey)
+
 			// submit first set of tob txs
 			tobTxReqs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
 			for _, tx := range c.firstTobTxs {
@@ -379,7 +390,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			}
 			jsonReq, err := req.MarshalJSON()
 			require.NoError(t, err)
-			rr := backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+			rr := backend.requestBytes(http.MethodPost, tobTxSubmitPath, jsonReq, map[string]string{
 				"Content-Type": "application/json",
 			})
 			require.NoError(t, err)
@@ -428,7 +439,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			}
 			jsonReq, err = req.MarshalJSON()
 			require.NoError(t, err)
-			rr = backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+			rr = backend.requestBytes(http.MethodPost, tobTxSubmitPath, jsonReq, map[string]string{
 				"Content-Type": "application/json",
 			})
 			if !c.nextSentIsHigher {
@@ -468,8 +479,6 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 
 func TestSubmitTobTxs(t *testing.T) {
 	backend := newTestBackend(t, 1)
-	path := "/relay/v1/builder/tob_txs"
-	addr1 := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
 
 	cases := []struct {
 		description   string
@@ -484,7 +493,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &addr1,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx6"),
 				}),
@@ -499,7 +508,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &addr1,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx6"),
 				}),
@@ -507,7 +516,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &addr1,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(5),
 					Data:     []byte(""),
 				}),
@@ -545,7 +554,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &addr1,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx6"),
 				}),
@@ -574,7 +583,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &addr1,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx3"),
 				}),
@@ -597,7 +606,6 @@ func TestSubmitTobTxs(t *testing.T) {
 			backend := newTestBackend(t, 1)
 
 			headSlot := uint64(32)
-			submissionSlot := headSlot + 1
 
 			// Payload attributes
 			parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
@@ -610,28 +618,8 @@ func TestSubmitTobTxs(t *testing.T) {
 			require.NoError(t, err)
 			proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
 
-			// Setup the test relay backend
-			backend.relay.headSlot.Store(headSlot)
-			backend.relay.capellaEpoch = 1
-			backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
-			backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
-				Slot: headSlot,
-				Entry: &types.SignedValidatorRegistration{
-					Message: &types.RegisterValidatorRequestMessage{
-						Pubkey:       boosttypes.PublicKey(proposerPubkey),
-						FeeRecipient: feeRec,
-					},
-				},
-			}
-			backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
-			backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
-				slot:       submissionSlot,
-				parentHash: parentHash,
-				payloadAttributes: beaconclient.PayloadAttributes{
-					PrevRandao: prevRandao,
-				},
-				withdrawalsRoot: phase0.Root(withdrawalsRoot),
-			}
+			prepareBackend(backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey)
+
 			tobTxReqs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
 			for _, tx := range c.tobTxs {
 				txByte, err := tx.MarshalBinary()
@@ -647,7 +635,7 @@ func TestSubmitTobTxs(t *testing.T) {
 			}
 			jsonReq, err := req.MarshalJSON()
 			require.NoError(t, err)
-			rr := backend.requestBytes(http.MethodPost, path, jsonReq, map[string]string{
+			rr := backend.requestBytes(http.MethodPost, tobTxSubmitPath, jsonReq, map[string]string{
 				"Content-Type": "application/json",
 			})
 
@@ -690,10 +678,7 @@ func TestSubmitTobTxs(t *testing.T) {
 }
 
 func TestSubmitBuilderBlockInSequence(t *testing.T) {
-	submitBlockPath := "/relay/v1/builder/blocks"
-	submitTobTxsPath := "/relay/v1/builder/tob_txs"
 	backend := newTestBackend(t, 1)
-	uniswapV2Address := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
 
 	cases := []struct {
 		description      string
@@ -708,7 +693,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    1,
 					GasPrice: big.NewInt(1),
 					Gas:      1,
-					To:       &uniswapV2Address,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(1),
 					Data:     []byte("tx1"),
 				}),
@@ -726,7 +711,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &uniswapV2Address,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx3"),
 				}),
@@ -748,7 +733,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    1,
 					GasPrice: big.NewInt(1),
 					Gas:      1,
-					To:       &uniswapV2Address,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(1),
 					Data:     []byte("tx1"),
 				}),
@@ -766,7 +751,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &uniswapV2Address,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx3"),
 				}),
@@ -793,38 +778,18 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 
 			// Payload attributes
 			payloadJSONFilename := "../../testdata/submitBlockPayloadCapella_Goerli.json.gz"
+
 			parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
 			feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
 			require.NoError(t, err)
 			withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
 			require.NoError(t, err)
 			prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+			proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+			require.NoError(t, err)
+			proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
 
-			// Setup the test relay backend
-			backend.relay.headSlot.Store(headSlot)
-			backend.relay.capellaEpoch = 1
-			backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
-			backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
-				Slot: headSlot,
-				Entry: &types.SignedValidatorRegistration{
-					Message: &types.RegisterValidatorRequestMessage{
-						FeeRecipient: feeRec,
-					},
-				},
-			}
-			backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
-			backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
-				slot:       submissionSlot,
-				parentHash: parentHash,
-				payloadAttributes: beaconclient.PayloadAttributes{
-					PrevRandao: prevRandao,
-				},
-				withdrawalsRoot: phase0.Root(withdrawalsRoot),
-			}
-			backend.relay.blockAssembler = &MockBlockAssembler{
-				assemblerError: nil,
-			}
-
+			prepareBackend(backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey)
 			// submit the first ToB txs
 			txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
 			require.NoError(t, err)
@@ -842,7 +807,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			jsonReq, err := req.MarshalJSON()
 			require.NoError(t, err)
 
-			rr := backend.requestBytes(http.MethodPost, submitTobTxsPath, jsonReq, map[string]string{
+			rr := backend.requestBytes(http.MethodPost, tobTxSubmitPath, jsonReq, map[string]string{
 				"Content-Type": "application/json",
 			})
 			require.Equal(t, http.StatusOK, rr.Code)
@@ -893,7 +858,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			reqJSONBytes2, err := json.Marshal(blockSubmitReq.Capella)
 			require.NoError(t, err)
 			require.Equal(t, reqJSONBytes, reqJSONBytes2)
-			rr = backend.requestBytes(http.MethodPost, submitBlockPath, reqJSONBytes, nil)
+			rr = backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			require.Equal(t, http.StatusOK, rr.Code)
 
 			txPipeliner := backend.redis.NewPipeline()
@@ -949,7 +914,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			jsonReq, err = req.MarshalJSON()
 			require.NoError(t, err)
 
-			rr = backend.requestBytes(http.MethodPost, submitTobTxsPath, jsonReq, map[string]string{
+			rr = backend.requestBytes(http.MethodPost, tobTxSubmitPath, jsonReq, map[string]string{
 				"Content-Type": "application/json",
 			})
 
@@ -1007,7 +972,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			reqJSONBytes2, err = json.Marshal(blockSubmitReq.Capella)
 			require.NoError(t, err)
 			require.Equal(t, reqJSONBytes, reqJSONBytes2)
-			rr = backend.requestBytes(http.MethodPost, submitBlockPath, reqJSONBytes, nil)
+			rr = backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			require.Equal(t, http.StatusOK, rr.Code)
 
 			txPipeliner = backend.redis.NewPipeline()
@@ -1073,10 +1038,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 }
 
 func TestSubmitBuilderBlock(t *testing.T) {
-	submitBlockPath := "/relay/v1/builder/blocks"
-	submitTobTxsPath := "/relay/v1/builder/tob_txs"
 	backend := newTestBackend(t, 1)
-	uniswapV2Address := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
 
 	cases := []struct {
 		description   string
@@ -1095,7 +1057,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Address,
+					To:       &uniswapV2Addr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -1122,37 +1084,18 @@ func TestSubmitBuilderBlock(t *testing.T) {
 
 			// Payload attributes
 			payloadJSONFilename := "../../testdata/submitBlockPayloadCapella_Goerli.json.gz"
+
 			parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
 			feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
 			require.NoError(t, err)
 			withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
 			require.NoError(t, err)
 			prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+			proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+			require.NoError(t, err)
+			proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
 
-			// Setup the test relay backend
-			backend.relay.headSlot.Store(headSlot)
-			backend.relay.capellaEpoch = 1
-			backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
-			backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
-				Slot: headSlot,
-				Entry: &types.SignedValidatorRegistration{
-					Message: &types.RegisterValidatorRequestMessage{
-						FeeRecipient: feeRec,
-					},
-				},
-			}
-			backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
-			backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
-				slot:       submissionSlot,
-				parentHash: parentHash,
-				payloadAttributes: beaconclient.PayloadAttributes{
-					PrevRandao: prevRandao,
-				},
-				withdrawalsRoot: phase0.Root(withdrawalsRoot),
-			}
-			backend.relay.blockAssembler = &MockBlockAssembler{
-				assemblerError: nil,
-			}
+			prepareBackend(backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey)
 
 			// create the ToB txs
 			tobTxsValue := big.NewInt(0)
@@ -1174,7 +1117,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 				jsonReq, err := req.MarshalJSON()
 				require.NoError(t, err)
 
-				rr := backend.requestBytes(http.MethodPost, submitTobTxsPath, jsonReq, map[string]string{
+				rr := backend.requestBytes(http.MethodPost, tobTxSubmitPath, jsonReq, map[string]string{
 					"Content-Type": "application/json",
 				})
 				require.Equal(t, http.StatusOK, rr.Code)
@@ -1227,7 +1170,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			reqJSONBytes2, err := json.Marshal(req.Capella)
 			require.NoError(t, err)
 			require.Equal(t, reqJSONBytes, reqJSONBytes2)
-			rr := backend.requestBytes(http.MethodPost, submitBlockPath, reqJSONBytes, nil)
+			rr := backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			if c.requiredError != "" {
 				require.Contains(t, rr.Body.String(), c.requiredError)
 			} else {
