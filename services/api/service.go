@@ -2105,13 +2105,13 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		Capella: &builderCapella.SubmitBlockRequest{
 			Message: &v1.BidTrace{
 				Slot:                 payload.Message().Slot,
-				ParentHash:           payload.Message().ParentHash,
-				BlockHash:            payload.Message().BlockHash,
+				ParentHash:           assembledPayload.ParentHash,
+				BlockHash:            assembledPayload.BlockHash,
 				BuilderPubkey:        payload.Message().BuilderPubkey,
 				ProposerPubkey:       payload.Message().ProposerPubkey,
-				ProposerFeeRecipient: payload.Message().ProposerFeeRecipient,
-				GasLimit:             payload.Message().GasLimit,
-				GasUsed:              payload.Message().GasUsed,
+				ProposerFeeRecipient: assembledPayload.FeeRecipient,
+				GasLimit:             assembledPayload.GasLimit,
+				GasUsed:              assembledPayload.GasUsed,
 				Value:                uint256.NewInt(totalBidValue.Uint64()),
 			},
 			ExecutionPayload: assembledPayload,
