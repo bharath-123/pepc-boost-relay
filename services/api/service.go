@@ -2027,6 +2027,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 
 		totalBidValue = new(big.Int).Add(payload.Value(), tobTxValue)
 	}
+
 	// Get the latest top bid value from Redis
 	bidIsTopBid := false
 	topBidValue, err := api.redis.GetTopBidValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
