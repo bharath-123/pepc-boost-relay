@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math/big"
 	"net/http"
 	"testing"
@@ -27,6 +26,92 @@ var (
 	blockSubmitPath = "/relay/v1/builder/blocks"
 	tobTxSubmitPath = "/relay/v1/builder/tob_txs"
 )
+
+func prepareBackend(backend *testBackend, slot uint64, parentHash string, feeRec types.Address, withdrawalsRoot []byte, prevRandao string, proposerPubkey phase0.BLSPubKey) {
+	headSlot := slot
+	submissionSlot := headSlot + 1
+
+	// Setup the test relay backend
+	backend.relay.headSlot.Store(headSlot)
+	backend.relay.capellaEpoch = 1
+	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
+	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
+		Slot: headSlot,
+		Entry: &types.SignedValidatorRegistration{
+			Message: &types.RegisterValidatorRequestMessage{
+				Pubkey:       boosttypes.PublicKey(proposerPubkey),
+				FeeRecipient: feeRec,
+			},
+		},
+	}
+	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
+	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
+		slot:       submissionSlot,
+		parentHash: parentHash,
+		payloadAttributes: beaconclient.PayloadAttributes{
+			PrevRandao: prevRandao,
+		},
+		withdrawalsRoot: phase0.Root(withdrawalsRoot),
+	}
+	backend.relay.blockAssembler = &MockBlockAssembler{
+		assemblerError: nil,
+	}
+}
+
+func prepareBlockSubmitRequest(t *testing.T, payloadJSONFilename string, submissionSlot, submissionTimestamp uint64, backend *testBackend) *common.BuilderSubmitBlockRequest {
+	// Prepare the request payload
+	req := new(common.BuilderSubmitBlockRequest)
+	requestPayloadJSONBytes := common.LoadGzippedBytes(t, payloadJSONFilename)
+	err := json.Unmarshal(requestPayloadJSONBytes, &req)
+	require.NoError(t, err)
+
+	// Update
+	req.Capella.Message.Slot = submissionSlot
+	req.Capella.ExecutionPayload.Timestamp = submissionTimestamp
+	// create valid builder keypairs
+	// TODO - store a valid payload in testdata
+	secretKey, publicKey, err := bls.GenerateNewKeypair()
+	require.NoError(t, err)
+	pKey, err := boosttypes.BlsPublicKeyToPublicKey(publicKey)
+	require.NoError(t, err)
+	req.Capella.Message.BuilderPubkey = phase0.BLSPubKey(pKey)
+	// sign the payload with the builder keypair
+	signature, err := boosttypes.SignMessage(req.Message(), backend.relay.opts.EthNetDetails.DomainBuilder, secretKey)
+	require.NoError(t, err)
+	req.Capella.Signature = phase0.BLSSignature(signature)
+
+	return req
+}
+
+func assertTobTxs(t *testing.T, backend *testBackend, slot uint64, parentHash string, tobTxValue *big.Int, txHashRoot [32]byte) {
+	tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), slot, parentHash)
+	require.NoError(t, err)
+	require.Equal(t, tobTxValue, tobTxValue)
+
+	tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), slot, parentHash)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, len(tobtxs))
+
+	firstTx := new(gethtypes.Transaction)
+	err = firstTx.UnmarshalBinary(tobtxs[0])
+	require.NoError(t, err)
+
+	secondTx := new(gethtypes.Transaction)
+	err = secondTx.UnmarshalBinary(tobtxs[1])
+	require.NoError(t, err)
+
+	firstTxBytes, err := firstTx.MarshalBinary()
+	require.NoError(t, err)
+	secondTxBytes, err := secondTx.MarshalBinary()
+	require.NoError(t, err)
+
+	txsPostStoringInRedis := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{firstTxBytes, secondTxBytes}}
+	txsPostStoringInRedisHashRoot, err := txsPostStoringInRedis.HashTreeRoot()
+	require.NoError(t, err)
+	require.Equal(t, txHashRoot, txsPostStoringInRedisHashRoot)
+
+}
 
 // TODO - this test will keep evolving as we expand the state interference checks
 func TestCheckTxAndSenderValidity(t *testing.T) {
@@ -233,37 +318,6 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 	}
 }
 
-func prepareBackend(backend *testBackend, slot uint64, parentHash string, feeRec types.Address, withdrawalsRoot []byte, prevRandao string, proposerPubkey phase0.BLSPubKey) {
-	headSlot := slot
-	submissionSlot := headSlot + 1
-
-	// Setup the test relay backend
-	backend.relay.headSlot.Store(headSlot)
-	backend.relay.capellaEpoch = 1
-	backend.relay.proposerDutiesMap = make(map[uint64]*common.BuilderGetValidatorsResponseEntry)
-	backend.relay.proposerDutiesMap[headSlot+1] = &common.BuilderGetValidatorsResponseEntry{
-		Slot: headSlot,
-		Entry: &types.SignedValidatorRegistration{
-			Message: &types.RegisterValidatorRequestMessage{
-				Pubkey:       boosttypes.PublicKey(proposerPubkey),
-				FeeRecipient: feeRec,
-			},
-		},
-	}
-	backend.relay.payloadAttributes = make(map[string]payloadAttributesHelper)
-	backend.relay.payloadAttributes[parentHash] = payloadAttributesHelper{
-		slot:       submissionSlot,
-		parentHash: parentHash,
-		payloadAttributes: beaconclient.PayloadAttributes{
-			PrevRandao: prevRandao,
-		},
-		withdrawalsRoot: phase0.Root(withdrawalsRoot),
-	}
-	backend.relay.blockAssembler = &MockBlockAssembler{
-		assemblerError: nil,
-	}
-}
-
 // tests when tob txs are sent in sequence
 func TestSubmitTobTxsInSequence(t *testing.T) {
 	backend := newTestBackend(t, 1)
@@ -396,32 +450,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, rr.Code)
 			// first checks should check for the first set of tob txs
-			tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
-			require.NoError(t, err)
-			require.Equal(t, tobTxValue, c.firstTobTxs[len(c.firstTobTxs)-1].Value())
-
-			tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
-			require.NoError(t, err)
-
-			require.Equal(t, 2, len(tobtxs))
-
-			firstTx := new(gethtypes.Transaction)
-			err = firstTx.UnmarshalBinary(tobtxs[0])
-			require.NoError(t, err)
-
-			secondTx := new(gethtypes.Transaction)
-			err = secondTx.UnmarshalBinary(tobtxs[1])
-			require.NoError(t, err)
-
-			firstTxBytes, err := firstTx.MarshalBinary()
-			require.NoError(t, err)
-			secondTxBytes, err := secondTx.MarshalBinary()
-			require.NoError(t, err)
-
-			txsPostStoringInRedis := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{firstTxBytes, secondTxBytes}}
-			txsPostStoringInRedisHashRoot, err := txsPostStoringInRedis.HashTreeRoot()
-			require.NoError(t, err)
-			require.Equal(t, firstSetTxHashRoot, txsPostStoringInRedisHashRoot)
+			assertTobTxs(t, backend, headSlot+1, parentHash, c.firstTobTxs[len(c.firstTobTxs)-1].Value(), firstSetTxHashRoot)
 
 			// submit second set of txs
 			tobTxReqs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
@@ -448,30 +477,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 				require.Contains(t, rr.Body.String(), "TOB tx value is less than the current value!")
 			} else {
 				// the tob txs should be the second set
-				tobTxValue, err = backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
-				require.NoError(t, err)
-
-				tobtxs, err = backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
-				require.NoError(t, err)
-				require.Equal(t, 2, len(tobtxs))
-
-				firstTx = new(gethtypes.Transaction)
-				err = firstTx.UnmarshalBinary(tobtxs[0])
-				require.NoError(t, err)
-
-				secondTx = new(gethtypes.Transaction)
-				err = secondTx.UnmarshalBinary(tobtxs[1])
-				require.NoError(t, err)
-
-				firstTxBytes, err = firstTx.MarshalBinary()
-				require.NoError(t, err)
-				secondTxBytes, err = secondTx.MarshalBinary()
-				require.NoError(t, err)
-
-				txsPostStoringInRedis = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{firstTxBytes, secondTxBytes}}
-				txsPostStoringInRedisHashRoot, err = txsPostStoringInRedis.HashTreeRoot()
-				require.Equal(t, tobTxValue, c.secondTobTxs[len(c.secondTobTxs)-1].Value())
-				require.Equal(t, txsPostStoringInRedisHashRoot, secondSetTxHashRoot)
+				assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), secondSetTxHashRoot)
 			}
 		})
 	}
@@ -639,39 +645,10 @@ func TestSubmitTobTxs(t *testing.T) {
 				"Content-Type": "application/json",
 			})
 
-			//err := backend.relay.checkTxAndSenderValidity(c.txs)
 			if c.requiredError != "" {
 				require.Contains(t, rr.Body.String(), c.requiredError)
 			} else {
-				require.NoError(t, err)
-				tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
-				require.NoError(t, err)
-				fmt.Printf("tobTxValue in test is : %v\n", tobTxValue)
-				require.Equal(t, tobTxValue, big.NewInt(10))
-
-				tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
-				require.NoError(t, err)
-
-				require.Equal(t, 2, len(tobtxs))
-
-				firstTx := new(gethtypes.Transaction)
-				err = firstTx.UnmarshalBinary(tobtxs[0])
-				require.NoError(t, err)
-
-				secondTx := new(gethtypes.Transaction)
-				err = secondTx.UnmarshalBinary(tobtxs[1])
-				require.NoError(t, err)
-
-				firstTxBytes, err := firstTx.MarshalBinary()
-				require.NoError(t, err)
-				secondTxBytes, err := secondTx.MarshalBinary()
-				require.NoError(t, err)
-
-				txsPostStoringInRedis := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{firstTxBytes, secondTxBytes}}
-				txsPostStoringInRedisHashRoot, err := txsPostStoringInRedis.HashTreeRoot()
-				require.NoError(t, err)
-				require.Equal(t, txHashRoot, txsPostStoringInRedisHashRoot)
-
+				assertTobTxs(t, backend, headSlot+1, parentHash, c.tobTxs[len(c.tobTxs)-1].Value(), txHashRoot)
 			}
 		})
 	}
@@ -812,22 +789,10 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			})
 			require.Equal(t, http.StatusOK, rr.Code)
 
-			tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
-			require.NoError(t, err)
 			payoutTxs := c.firstTobTxs[len(c.firstTobTxs)-1]
-			require.Equal(t, tobTxValue, payoutTxs.Value())
 			tobTxsValue := payoutTxs.Value()
 
-			tobTxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
-			require.NoError(t, err)
-			require.Equal(t, len(c.firstTobTxs), len(tobTxs))
-			txOutOfRedis := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
-			for _, tx := range tobTxs {
-				txOutOfRedis.Transactions = append(txOutOfRedis.Transactions, tx)
-			}
-			txsOutOfRedisHash, err := txOutOfRedis.HashTreeRoot()
-			require.NoError(t, err)
-			require.Equal(t, txsHashRoot, txsOutOfRedisHash)
+			assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot)
 
 			// Prepare the request payload
 			blockSubmitReq := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
@@ -909,22 +874,10 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			}
 			require.Equal(t, http.StatusOK, rr.Code)
 
-			tobTxValue, err = backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
-			require.NoError(t, err)
 			payoutTxs = c.secondTobTxs[len(c.secondTobTxs)-1]
-			require.Equal(t, tobTxValue, payoutTxs.Value())
 			tobTxsValue = payoutTxs.Value()
 
-			tobTxs, err = backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
-			require.NoError(t, err)
-			require.Equal(t, len(c.secondTobTxs), len(tobTxs))
-			txOutOfRedis = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
-			for _, tx := range tobTxs {
-				txOutOfRedis.Transactions = append(txOutOfRedis.Transactions, tx)
-			}
-			txsOutOfRedisHash, err = txOutOfRedis.HashTreeRoot()
-			require.NoError(t, err)
-			require.Equal(t, txsHashRoot, txsOutOfRedisHash)
+			assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), txsHashRoot)
 
 			blockSubmitReq = prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
 
@@ -1000,31 +953,6 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 		})
 	}
 
-}
-
-func prepareBlockSubmitRequest(t *testing.T, payloadJSONFilename string, submissionSlot, submissionTimestamp uint64, backend *testBackend) *common.BuilderSubmitBlockRequest {
-	// Prepare the request payload
-	req := new(common.BuilderSubmitBlockRequest)
-	requestPayloadJSONBytes := common.LoadGzippedBytes(t, payloadJSONFilename)
-	err := json.Unmarshal(requestPayloadJSONBytes, &req)
-	require.NoError(t, err)
-
-	// Update
-	req.Capella.Message.Slot = submissionSlot
-	req.Capella.ExecutionPayload.Timestamp = submissionTimestamp
-	// create valid builder keypairs
-	// TODO - store a valid payload in testdata
-	secretKey, publicKey, err := bls.GenerateNewKeypair()
-	require.NoError(t, err)
-	pKey, err := boosttypes.BlsPublicKeyToPublicKey(publicKey)
-	require.NoError(t, err)
-	req.Capella.Message.BuilderPubkey = phase0.BLSPubKey(pKey)
-	// sign the payload with the builder keypair
-	signature, err := boosttypes.SignMessage(req.Message(), backend.relay.opts.EthNetDetails.DomainBuilder, secretKey)
-	require.NoError(t, err)
-	req.Capella.Signature = phase0.BLSSignature(signature)
-
-	return req
 }
 
 func TestSubmitBuilderBlock(t *testing.T) {
@@ -1112,22 +1040,9 @@ func TestSubmitBuilderBlock(t *testing.T) {
 				})
 				require.Equal(t, http.StatusOK, rr.Code)
 
-				tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), headSlot+1, parentHash)
-				require.NoError(t, err)
 				payoutTxs := c.tobTxs[len(c.tobTxs)-1]
-				require.Equal(t, tobTxValue, payoutTxs.Value())
 				tobTxsValue = payoutTxs.Value()
-
-				tobTxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), headSlot+1, parentHash)
-				require.NoError(t, err)
-				require.Equal(t, len(c.tobTxs), len(tobTxs))
-				txOutOfRedis := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
-				for _, tx := range tobTxs {
-					txOutOfRedis.Transactions = append(txOutOfRedis.Transactions, tx)
-				}
-				txsOutOfRedisHash, err := txOutOfRedis.HashTreeRoot()
-				require.NoError(t, err)
-				require.Equal(t, txsHashRoot, txsOutOfRedisHash)
+				assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot)
 			}
 
 			// Prepare the request payload
