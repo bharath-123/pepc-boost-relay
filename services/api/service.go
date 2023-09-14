@@ -1630,6 +1630,10 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *log
 	// execution layer. We should ideally
 	// TODO - expand state interference checks as in checkTobTxsStateInterference
 
+	if len(txs) < 2 {
+		return fmt.Errorf("We require a payment tx along with the TOB txs!")
+	}
+
 	// Start: Payout checks
 	lastTx := txs[len(txs)-1]
 
@@ -1724,15 +1728,10 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(txs) < 2 {
-		log.Error("We require a payment tx along with the TOB txs!")
-		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
-		return
-	}
 
 	err = api.checkTxAndSenderValidity(txs, log)
 	if err != nil {
-		log.WithError(err).Warn("error validating the txs")
+		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
