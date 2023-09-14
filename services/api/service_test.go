@@ -320,7 +320,7 @@ func TestGetHeader(t *testing.T) {
 		ProposerPubkey: proposerPubkey,
 	}
 	payload, getPayloadResp, getHeaderResp := common.CreateTestBlockSubmission(t, builderPubkey, bidValue, &opts)
-	_, err := backend.redis.SaveBidAndUpdateTopBid(context.Background(), backend.redis.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), false, nil)
+	_, err := backend.redis.SaveBidAndUpdateTopBid(context.Background(), backend.redis.NewPipeline(), trace, payload, getPayloadResp, getHeaderResp, time.Now(), false, nil, big.NewInt(0))
 	require.NoError(t, err)
 
 	// Check 1: regular request works and returns a bid
