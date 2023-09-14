@@ -1762,6 +1762,10 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	// This is already solved and should be straightforward to implement. its basically simulation
 	// with some additional checks
 
+	// TODO - bchain - if a searcher submits these ToB txs in the same slot they want to include in the block,
+	// we might miss out on higher value RoB blocks that are submitted in the same slot but before the searcher
+	// submits the ToB txs. This is more complicated to implement, so we can pick it up later
+
 	// add the tob tx to the redis cache
 	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
 	if err != nil {
