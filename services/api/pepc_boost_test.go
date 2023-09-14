@@ -1230,7 +1230,9 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			}
 			bid, err := backend.redis.GetBidTrace(headSlot+1, req.ProposerPubkey(), req.BlockHash())
 			require.NoError(t, err)
-			require.Equal(t, bid.Value, totalExpectedBidValue)
+			require.Equal(t, bid.Value.ToBig(), totalExpectedBidValue)
+			require.Equal(t, bid.Slot, headSlot+1)
+			require.Equal(t, int(bid.NumTx), req.NumTx()+len(c.tobTxs))
 		})
 	}
 }
