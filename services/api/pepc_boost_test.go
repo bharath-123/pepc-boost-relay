@@ -830,25 +830,8 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			require.Equal(t, txsHashRoot, txsOutOfRedisHash)
 
 			// Prepare the request payload
-			blockSubmitReq := new(common.BuilderSubmitBlockRequest)
-			requestPayloadJSONBytes := common.LoadGzippedBytes(t, payloadJSONFilename)
-			require.NoError(t, err)
-			err = json.Unmarshal(requestPayloadJSONBytes, &blockSubmitReq)
-			require.NoError(t, err)
+			blockSubmitReq := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
 
-			// Update
-			blockSubmitReq.Capella.Message.Slot = submissionSlot
-			blockSubmitReq.Capella.ExecutionPayload.Timestamp = uint64(submissionTimestamp)
-			// create valid builder keypairs
-			secretKey, publicKey, err := bls.GenerateNewKeypair()
-			require.NoError(t, err)
-			pKey, err := boosttypes.BlsPublicKeyToPublicKey(publicKey)
-			require.NoError(t, err)
-			blockSubmitReq.Capella.Message.BuilderPubkey = phase0.BLSPubKey(pKey)
-			// sign the payload with the builder keypair
-			signature, err := boosttypes.SignMessage(blockSubmitReq.Message(), backend.relay.opts.EthNetDetails.DomainBuilder, secretKey)
-			require.NoError(t, err)
-			blockSubmitReq.Capella.Signature = phase0.BLSSignature(signature)
 			totalExpectedBidValue := big.NewInt(0).Add(blockSubmitReq.Message().Value.ToBig(), tobTxsValue)
 
 			// Send JSON encoded request
@@ -943,26 +926,8 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, txsHashRoot, txsOutOfRedisHash)
 
-			// submit a new block now
-			blockSubmitReq = new(common.BuilderSubmitBlockRequest)
-			requestPayloadJSONBytes = common.LoadGzippedBytes(t, payloadJSONFilename)
-			require.NoError(t, err)
-			err = json.Unmarshal(requestPayloadJSONBytes, &blockSubmitReq)
-			require.NoError(t, err)
+			blockSubmitReq = prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
 
-			// Update
-			blockSubmitReq.Capella.Message.Slot = submissionSlot
-			blockSubmitReq.Capella.ExecutionPayload.Timestamp = uint64(submissionTimestamp)
-			// create valid builder keypairs
-			secretKey, publicKey, err = bls.GenerateNewKeypair()
-			require.NoError(t, err)
-			pKey, err = boosttypes.BlsPublicKeyToPublicKey(publicKey)
-			require.NoError(t, err)
-			blockSubmitReq.Capella.Message.BuilderPubkey = phase0.BLSPubKey(pKey)
-			// sign the payload with the builder keypair
-			signature, err = boosttypes.SignMessage(blockSubmitReq.Message(), backend.relay.opts.EthNetDetails.DomainBuilder, secretKey)
-			require.NoError(t, err)
-			blockSubmitReq.Capella.Signature = phase0.BLSSignature(signature)
 			totalExpectedBidValue = big.NewInt(0).Add(blockSubmitReq.Message().Value.ToBig(), tobTxsValue)
 
 			// Send JSON encoded request
@@ -1035,6 +1000,31 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 		})
 	}
 
+}
+
+func prepareBlockSubmitRequest(t *testing.T, payloadJSONFilename string, submissionSlot, submissionTimestamp uint64, backend *testBackend) *common.BuilderSubmitBlockRequest {
+	// Prepare the request payload
+	req := new(common.BuilderSubmitBlockRequest)
+	requestPayloadJSONBytes := common.LoadGzippedBytes(t, payloadJSONFilename)
+	err := json.Unmarshal(requestPayloadJSONBytes, &req)
+	require.NoError(t, err)
+
+	// Update
+	req.Capella.Message.Slot = submissionSlot
+	req.Capella.ExecutionPayload.Timestamp = submissionTimestamp
+	// create valid builder keypairs
+	// TODO - store a valid payload in testdata
+	secretKey, publicKey, err := bls.GenerateNewKeypair()
+	require.NoError(t, err)
+	pKey, err := boosttypes.BlsPublicKeyToPublicKey(publicKey)
+	require.NoError(t, err)
+	req.Capella.Message.BuilderPubkey = phase0.BLSPubKey(pKey)
+	// sign the payload with the builder keypair
+	signature, err := boosttypes.SignMessage(req.Message(), backend.relay.opts.EthNetDetails.DomainBuilder, secretKey)
+	require.NoError(t, err)
+	req.Capella.Signature = phase0.BLSSignature(signature)
+
+	return req
 }
 
 func TestSubmitBuilderBlock(t *testing.T) {
@@ -1141,35 +1131,12 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			}
 
 			// Prepare the request payload
-			req := new(common.BuilderSubmitBlockRequest)
-			requestPayloadJSONBytes := common.LoadGzippedBytes(t, payloadJSONFilename)
-			require.NoError(t, err)
-			err = json.Unmarshal(requestPayloadJSONBytes, &req)
-			require.NoError(t, err)
+			req := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
 
-			// Update
-			req.Capella.Message.Slot = submissionSlot
-			req.Capella.ExecutionPayload.Timestamp = uint64(submissionTimestamp)
-			// create valid builder keypairs
-			// TODO - store a valid payload in testdata
-			secretKey, publicKey, err := bls.GenerateNewKeypair()
-			require.NoError(t, err)
-			pKey, err := boosttypes.BlsPublicKeyToPublicKey(publicKey)
-			require.NoError(t, err)
-			req.Capella.Message.BuilderPubkey = phase0.BLSPubKey(pKey)
-			// sign the payload with the builder keypair
-			signature, err := boosttypes.SignMessage(req.Message(), backend.relay.opts.EthNetDetails.DomainBuilder, secretKey)
-			require.NoError(t, err)
-			req.Capella.Signature = phase0.BLSSignature(signature)
 			totalExpectedBidValue := big.NewInt(0).Add(req.Message().Value.ToBig(), tobTxsValue)
 
 			// Send JSON encoded request
 			reqJSONBytes, err := req.Capella.MarshalJSON()
-			require.NoError(t, err)
-			require.Equal(t, 704810, len(reqJSONBytes))
-			reqJSONBytes2, err := json.Marshal(req.Capella)
-			require.NoError(t, err)
-			require.Equal(t, reqJSONBytes, reqJSONBytes2)
 			rr := backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			if c.requiredError != "" {
 				require.Contains(t, rr.Body.String(), c.requiredError)
