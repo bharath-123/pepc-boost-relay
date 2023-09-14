@@ -5,7 +5,6 @@ import (
 
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	"github.com/attestantio/go-eth2-client/spec/capella"
-	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/flashbots/mev-boost-relay/common"
 )
 
@@ -28,7 +27,6 @@ func (m *MockBlockAssembler) Send(context context.Context, payload *common.Block
 
 	finalPayload := &capella.ExecutionPayload{
 		Transactions: finalTxList,
-		ParentHash:   phase0.Hash32(payload.RobPayload.ParentHash()),
 		Withdrawals:  payload.RobPayload.Withdrawals(),
 	}
 
