@@ -60,7 +60,12 @@ func newTestBackend(t require.TestingT, numBeaconNodes int) *testBackend {
 	redisCache, err := datastore.NewRedisCache("", redisClient.Addr(), "")
 	require.NoError(t, err)
 
-	db := database.MockDB{}
+	db := database.MockDB{
+		ExecPayloads:     map[string]*database.ExecutionPayloadEntry{},
+		BlockSubmissions: map[string]*database.BuilderBlockSubmissionEntry{},
+		Builders:         map[string]*database.BlockBuilderEntry{},
+		Demotions:        map[string]bool{},
+	}
 
 	ds, err := datastore.NewDatastore(redisCache, nil, db)
 	require.NoError(t, err)
