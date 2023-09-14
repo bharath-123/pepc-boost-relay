@@ -1174,7 +1174,6 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			// Update
 			req.Capella.Message.Slot = submissionSlot
 			req.Capella.ExecutionPayload.Timestamp = uint64(submissionTimestamp)
-			fmt.Printf("DEBUG: payload value is %d\n", req.Value())
 			// create valid builder keypairs
 			// TODO - store a valid payload in testdata
 			secretKey, publicKey, err := bls.GenerateNewKeypair()
@@ -1203,11 +1202,14 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			}
 			// get the block stored in the db
 			txPipeliner := backend.redis.NewPipeline()
-			topBid, err := backend.redis.GetTopBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, req.ProposerPubkey())
-			fmt.Printf("DEBUG: topBid value is %d\n", topBid.Int64())
-			fmt.Printf("DEBUG: totalExpectedBidValue is %d\n", totalExpectedBidValue.Int64())
+			topBidValue, err := backend.redis.GetTopBidValue(context.Background(), txPipeliner, headSlot+1, parentHash, req.ProposerPubkey())
 			require.NoError(t, err)
-			require.Equal(t, totalExpectedBidValue, topBid)
+			require.Equal(t, totalExpectedBidValue, topBidValue)
+			bestBid, err := backend.redis.GetBestBid(headSlot+1, parentHash, req.ProposerPubkey())
+			require.NoError(t, err)
+			require.Equal(t, totalExpectedBidValue, bestBid.Value())
+			_, err = backend.redis.GetExecutionPayloadCapella(headSlot+1, req.ProposerPubkey(), req.BlockHash())
+			require.NoError(t, err)
 		})
 	}
 }

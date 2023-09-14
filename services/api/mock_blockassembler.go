@@ -28,6 +28,9 @@ func (m *MockBlockAssembler) Send(context context.Context, payload *common.Block
 	finalPayload := &capella.ExecutionPayload{
 		Transactions: finalTxList,
 		Withdrawals:  payload.RobPayload.Withdrawals(),
+		ParentHash:   payload.RobPayload.Capella.Message.ParentHash,
+		FeeRecipient: payload.RobPayload.Capella.Message.ProposerFeeRecipient,
+		BlockHash:    payload.RobPayload.Capella.Message.BlockHash,
 	}
 
 	return finalPayload, nil, m.assemblerError
