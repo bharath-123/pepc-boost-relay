@@ -1631,10 +1631,10 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction) error {
 	// TODO - expand state interference checks as in checkTobTxsStateInterference
 
 	if len(txs) == 0 {
-		return fmt.Errorf("empty TOB requst sent!")
+		return fmt.Errorf("Empty TOB tx request sent!")
 	}
 	if len(txs) == 1 {
-		return fmt.Errorf("we require a payment tx along with the TOB txs")
+		return fmt.Errorf("We require a payment tx along with the TOB txs!")
 	}
 
 	// Start: Payout checks
