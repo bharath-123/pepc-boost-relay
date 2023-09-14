@@ -1624,14 +1624,14 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction) erro
 }
 
 // This method first checks whether the payouts are valid, then checks whether the txs are valid w.r.t state interference
-func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *logrus.Entry) error {
+func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction) error {
 	// TODO - Payouts still need to be modelled
 	// TODO - check all the txs to see if the nonce is valid, value is valid, check if the tx has already been included. These can be confirmed from the
 	// execution layer. We should ideally
 	// TODO - expand state interference checks as in checkTobTxsStateInterference
 
 	if len(txs) == 0 {
-		return fmt.Errorf("empty txs sent!")
+		return fmt.Errorf("empty txs sent")
 	}
 	if len(txs) == 1 {
 		return fmt.Errorf("we require a payment tx along with the TOB txs")
@@ -1732,7 +1732,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	err = api.checkTxAndSenderValidity(txs, log)
+	err = api.checkTxAndSenderValidity(txs)
 	if err != nil {
 		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
