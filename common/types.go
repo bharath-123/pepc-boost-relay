@@ -946,3 +946,11 @@ type CallTrace struct {
 type CallTraceResponse struct {
 	Result CallTrace `json:"result"`
 }
+
+func (c *CallTraceResponse) MarshalJSON() ([]byte, error) {
+	return json.Marshal(c)
+}
+
+func (c *CallTraceResponse) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &c)
+}

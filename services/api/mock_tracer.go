@@ -10,14 +10,16 @@ import (
 
 type MockTracer struct {
 	tracerError string
+	callTrace   *common.CallTrace
 }
 
-func NewMockTracer(tracerError string) *MockTracer {
+func NewMockTracer(tracerError string, callTrace *common.CallTrace) *MockTracer {
 	return &MockTracer{
 		tracerError: tracerError,
+		callTrace:   callTrace,
 	}
 }
 
 func (t *MockTracer) TraceTx(context context.Context, tx *types.Transaction) (*common.CallTrace, error, error) {
-	return nil, nil, fmt.Errorf(t.tracerError)
+	return t.callTrace, nil, fmt.Errorf(t.tracerError)
 }
