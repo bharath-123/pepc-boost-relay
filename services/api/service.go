@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 	"github.com/buger/jsonparser"
 	common2 "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/flashbots/go-boost-utils/bls"
 	boostTypes "github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/go-utils/cli"
@@ -67,15 +69,18 @@ var (
 
 var (
 	// Proposer API (builder-specs)
-	pathStatus            = "/eth/v1/builder/status"
-	pathRegisterValidator = "/eth/v1/builder/validators"
-	pathGetHeader         = "/eth/v1/builder/header/{slot:[0-9]+}/{parent_hash:0x[a-fA-F0-9]+}/{pubkey:0x[a-fA-F0-9]+}"
-	pathGetPayload        = "/eth/v1/builder/blinded_blocks"
+	pathStatus               = "/eth/v1/builder/status"
+	pathRegisterValidator    = "/eth/v1/builder/validators"
+	pathGetHeader            = "/eth/v1/builder/header/{slot:[0-9]+}/{parent_hash:0x[a-fA-F0-9]+}/{pubkey:0x[a-fA-F0-9]+}"
+	pathGetPayload           = "/eth/v1/builder/blinded_blocks"
+	pathGetSlot              = "/eth/v1/relay/get_head_slot"
+	pathGetParentHashForSlot = "/eth/v1/relay/get_parent_hash_for_slot/{slot:[0-9]+}"
 
 	// Block builder API
 	pathBuilderGetValidators = "/relay/v1/builder/validators"
 	pathSubmitNewBlock       = "/relay/v1/builder/blocks"
 	pathSubmitNewTobTxs      = "/relay/v1/builder/tob_txs"
+	pathGetTobTxs            = "/relay/v1/builder/tob_txs/{slot:[0-9]+}/{parent_hash:0x[a-fA-F0-9]+}"
 
 	// Data API
 	pathDataProposerPayloadDelivered = "/relay/v1/data/bidtraces/proposer_payload_delivered"
@@ -243,8 +248,9 @@ type RelayAPI struct {
 	ffRegValContinueOnInvalidSig bool // whether to continue processing further validators if one fails
 	ffIgnorableValidationErrors  bool // whether to enable ignorable validation errors
 
-	payloadAttributes     map[string]payloadAttributesHelper // key:parentBlockHash
-	payloadAttributesLock sync.RWMutex
+	payloadAttributesBySlot map[uint64]payloadAttributesHelper
+	payloadAttributes       map[string]payloadAttributesHelper // key:parentBlockHash
+	payloadAttributesLock   sync.RWMutex
 
 	// The slot we are currently optimistically simulating.
 	optimisticSlot uberatomic.Uint64
@@ -337,7 +343,8 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 		memcached:            opts.Memcached,
 		db:                   opts.DB,
 
-		payloadAttributes: make(map[string]payloadAttributesHelper),
+		payloadAttributes:       make(map[string]payloadAttributesHelper),
+		payloadAttributesBySlot: make(map[uint64]payloadAttributesHelper),
 
 		proposerDutiesResponse: &[]byte{},
 		blockSimRateLimiter:    NewBlockSimulationRateLimiter(opts.BlockSimURL),
@@ -409,6 +416,7 @@ func (api *RelayAPI) getRouter() http.Handler {
 		r.HandleFunc(pathBuilderGetValidators, api.handleBuilderGetValidators).Methods(http.MethodGet)
 		r.HandleFunc(pathSubmitNewBlock, api.handleSubmitNewBlock).Methods(http.MethodPost)
 		r.HandleFunc(pathSubmitNewTobTxs, api.handleSubmitNewTobTxs).Methods(http.MethodPost)
+		r.HandleFunc(pathGetTobTxs, api.handleGetTobTxs).Methods(http.MethodGet)
 	}
 
 	// Data API
@@ -424,6 +432,9 @@ func (api *RelayAPI) getRouter() http.Handler {
 		api.log.Info("pprof API enabled")
 		r.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)
 	}
+
+	r.HandleFunc(pathGetSlot, api.handleGetSlot).Methods(http.MethodGet)
+	r.HandleFunc(pathGetParentHashForSlot, api.handleGetParentHashForSlot).Methods(http.MethodGet)
 
 	// /internal/...
 	if api.opts.InternalAPI {
@@ -846,6 +857,12 @@ func (api *RelayAPI) processPayloadAttributes(payloadAttributes beaconclient.Pay
 	}
 
 	// Step 2: save new one
+	api.payloadAttributesBySlot[payloadAttributes.Data.ProposalSlot] = payloadAttributesHelper{
+		slot:              payloadAttrSlot,
+		parentHash:        payloadAttributes.Data.ParentBlockHash,
+		withdrawalsRoot:   withdrawalsRoot,
+		payloadAttributes: payloadAttributes.Data.PayloadAttributes,
+	}
 	api.payloadAttributes[payloadAttributes.Data.ParentBlockHash] = payloadAttributesHelper{
 		slot:              payloadAttrSlot,
 		parentHash:        payloadAttributes.Data.ParentBlockHash,
@@ -1014,6 +1031,66 @@ func (api *RelayAPI) handleStatus(w http.ResponseWriter, req *http.Request) {
 // ---------------
 //  PROPOSER APIS
 // ---------------
+
+func (api *RelayAPI) handleGetTobTxs(w http.ResponseWriter, req *http.Request) {
+	slotStr := mux.Vars(req)["slot"]
+	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	if err != nil {
+		log.Info("DEBUG: Invalid slot", "slot", slotStr, "err", err.Error())
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+	}
+	parentHashHex := mux.Vars(req)["parent_hash"]
+
+	fields := api.log.WithFields(logrus.Fields{
+		"method":     "handleGetTobTxs",
+		"slot":       slotStr,
+		"parentHash": parentHashHex,
+	})
+
+	if len(parentHashHex) != 66 {
+		api.RespondError(w, http.StatusBadRequest, common.ErrInvalidHash.Error())
+		return
+	}
+
+	txPipeline := api.redis.NewTxPipeline()
+
+	tobTxs, err := api.redis.GetTobTx(context.Background(), txPipeline, slot, parentHashHex[2:])
+	if err != nil {
+		fields.WithError(err).Error("failed to get tob tx")
+		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	finalTxStrings := []string{}
+	for _, tx := range tobTxs {
+		finalTxStrings = append(finalTxStrings, hex.EncodeToString(tx))
+	}
+	finalTxString := strings.Join(finalTxStrings, ",")
+
+	api.RespondOK(w, finalTxString)
+}
+
+func (api *RelayAPI) handleGetSlot(w http.ResponseWriter, req *http.Request) {
+	api.RespondOK(w, api.headSlot.Load())
+}
+
+func (api *RelayAPI) handleGetParentHashForSlot(w http.ResponseWriter, req *http.Request) {
+	// slot is passed as url args
+	slotStr := mux.Vars(req)["slot"]
+	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	if err != nil {
+		log.Info("DEBUG: Invalid slot", "slot", slotStr, "err", err.Error())
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+	}
+
+	// get parent hash
+	res, ok := api.payloadAttributesBySlot[slot]
+	if !ok {
+		api.RespondError(w, http.StatusNotFound, "slot payload attributes not found")
+		return
+	}
+	api.RespondOK(w, res.parentHash)
+}
 
 func (api *RelayAPI) handleRoot(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
@@ -1912,6 +1989,11 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 
 	tobTxValue := lastTx.Value()
 	// store it in a redis cache. The ROB block will pick it up and assemble it along with its own txs
+	parentHash = strings.Trim(parentHash, "\"")
+	parentHash = strings.Trim(parentHash, "\n")
+	parentHash = strings.Trim(parentHash, "\r")
+	parentHash = strings.TrimSpace(parentHash)
+
 	currentTobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, slot, parentHash)
 	if err != nil {
 		log.WithError(err).Warn("could not get current Tob Tx value")
@@ -1927,7 +2009,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 
 	// TODO - bchain - simulate the txs on the parent block. If it fails, reject the txs.
 	// This is already solved and should be straightforward to implement. its basically tx simulation
-
+	log.Info("DEBUG: slot-parentHash is ", "slot", slot, "parentHash", parentHash)
 	// add the tob tx to the redis cache
 	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
 	if err != nil {
@@ -2131,16 +2213,20 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	// Get the best TOB tx value set from Redis
 	// If so proceed with assembly.
 	// check if there is a TOB tx
+
+	log.Info("DEBUG: Getting TOB txs with slot and parent hash", "slot", payload.Slot(), "parentHash", payload.ParentHash())
 	tobTxs, err := api.redis.GetTobTx(context.Background(), tx, payload.Slot(), payload.ParentHash())
 	if err != nil {
 		log.WithError(err).Error("failed to get tob txs from redis")
 		api.RespondError(w, http.StatusInternalServerError, "failed to get tob txs from redis")
 		return
 	}
+	log.Info("DEBUG: got TOBs!!", "noOfTobTxs", len(tobTxs))
 	// if there are no TOB txs then the ROB block is the final block
 	totalBidValue := payload.Value()
 	tobTxValue := big.NewInt(0)
 	if len(tobTxs) > 0 {
+		log.Info("DEBUG: Found ToB txs!!")
 		tobTxValue, err = api.redis.GetTobTxValue(context.Background(), tx, payload.Slot(), payload.ParentHash())
 		if err != nil {
 			log.WithError(err).Error("failed to get tob tx value from redis")
@@ -2149,6 +2235,8 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		}
 
 		totalBidValue = new(big.Int).Add(payload.Value(), tobTxValue)
+	} else {
+		log.Info("DEBUG: Found no Tob Txs!!!")
 	}
 
 	// Get the latest top bid value from Redis
@@ -2159,6 +2247,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		api.RespondError(w, http.StatusBadRequest, "failed to get top bid value from redis")
 		return
 	} else {
+		log.Info("DEBUG: it is top bid!")
 		bidIsTopBid = totalBidValue.Cmp(topBidValue) == 1
 		log = log.WithFields(logrus.Fields{
 			"topBidValue":    topBidValue.String(),
