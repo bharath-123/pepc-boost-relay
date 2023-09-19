@@ -905,10 +905,7 @@ func assertBlock(t *testing.T, backend *testBackend, headSlot uint64, parentHash
 func TestSubmitBuilderBlockInSequence(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
-	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/valid_weth_dai_tx_trace.json")
-	tx1Trace := new(common.CallTrace)
-	err := json.Unmarshal(tx1TraceContents, tx1Trace)
-	require.NoError(t, err)
+	_, validWethDaiTxTrace, _, _ := GetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description        string
@@ -956,8 +953,8 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			firstTobTxsTraces:  tx1Trace,
-			secondTobTxsTraces: tx1Trace,
+			firstTobTxsTraces:  validWethDaiTxTrace,
+			secondTobTxsTraces: validWethDaiTxTrace,
 			nextSentIsHigher:   true,
 		},
 		{
@@ -998,8 +995,8 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			firstTobTxsTraces:  tx1Trace,
-			secondTobTxsTraces: tx1Trace,
+			firstTobTxsTraces:  validWethDaiTxTrace,
+			secondTobTxsTraces: validWethDaiTxTrace,
 			nextSentIsHigher:   false,
 		},
 	}
@@ -1022,7 +1019,6 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 
 			// submit the first ToB txs
 			txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
-			require.NoError(t, err)
 			for _, tx := range c.firstTobTxs {
 				txBytes, err := tx.MarshalBinary()
 				require.NoError(t, err)
@@ -1125,25 +1121,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 func TestSubmitBuilderBlock(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
-	tx1Contents := common.LoadFileContents(t, "../../testdata/traces/custom/valid_weth_dai_tx.json")
-	tx1 := new(gethtypes.Transaction)
-	err := tx1.UnmarshalJSON(tx1Contents)
-	require.NoError(t, err)
-
-	tx2Contents := common.LoadFileContents(t, "../../testdata/traces/custom/invalid_weth_dai_tx.json")
-	tx2 := new(gethtypes.Transaction)
-	err = tx2.UnmarshalJSON(tx2Contents)
-	require.NoError(t, err)
-
-	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/valid_weth_dai_tx_trace.json")
-	tx1Trace := new(common.CallTrace)
-	err = json.Unmarshal(tx1TraceContents, tx1Trace)
-	require.NoError(t, err)
-
-	tx2TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/invalid_weth_dai_tx_trace.json")
-	tx2Trace := new(common.CallTrace)
-	err = json.Unmarshal(tx2TraceContents, tx2Trace)
-	require.NoError(t, err)
+	validWethDaiTx, validWethDaiTxTrace, _, _ := GetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
@@ -1161,12 +1139,12 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			description: "ToB txs of some value are present",
 			tobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    2,
-					GasPrice: big.NewInt(2),
-					Gas:      2,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(2),
-					Data:     []byte("tx1"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
@@ -1177,7 +1155,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			traces:        tx1Trace,
+			traces:        validWethDaiTxTrace,
 			requiredError: "",
 		},
 	}
@@ -1210,7 +1188,6 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			if len(c.tobTxs) > 0 {
 				req := new(common.TobTxsSubmitRequest)
 				txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
-				require.NoError(t, err)
 				for _, tx := range c.tobTxs {
 					txBytes, err := tx.MarshalBinary()
 					require.NoError(t, err)
