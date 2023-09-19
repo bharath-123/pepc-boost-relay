@@ -35,11 +35,18 @@ func (t *Tracer) TraceTx(context context.Context, tx *types.Transaction) (*commo
 	hexGas := fmt.Sprintf("0x%x", tx.Gas())
 	hexValue := fmt.Sprintf("0x%x", tx.Value())
 
+	signer := types.NewCancunSigner(tx.ChainId())
+	sender, err := signer.Sender(tx)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create the JSON-RPC request
 	request := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "debug_traceCall",
 		"params": []interface{}{map[string]interface{}{
+			"from":  sender,
 			"to":    tx.To(),
 			"gas":   hexGas,
 			"data":  hexEncodedData,

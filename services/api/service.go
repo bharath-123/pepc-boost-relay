@@ -37,6 +37,7 @@ import (
 	"github.com/flashbots/go-utils/httplogger"
 	"github.com/flashbots/mev-boost-relay/beaconclient"
 	"github.com/flashbots/mev-boost-relay/common"
+	"github.com/flashbots/mev-boost-relay/contracts"
 	"github.com/flashbots/mev-boost-relay/database"
 	"github.com/flashbots/mev-boost-relay/datastore"
 	"github.com/go-redis/redis/v9"
@@ -623,6 +624,63 @@ func (api *RelayAPI) getTraces(ctx context.Context, opts tracerOptions) (*common
 	}
 	log.Info("tracer successful")
 	return res, nil
+}
+
+// just check if it goes to the DaiWethPair with a swap tx
+func (api *RelayAPI) IsTxWEthDaiSwap(trace *common.CallTrace) (bool, error) {
+	stack := []common.CallTrace{*trace}
+
+	for len(stack) > 0 {
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		res, err := api.IsTraceToWEthDaiPair(current)
+		if err != nil {
+			return false, err
+		}
+		// we found a weth/dai swap i.e the tx contains a weth/dai swap
+		if res {
+			return true, nil
+		}
+
+		for _, call := range current.Calls {
+			stack = append(stack, call)
+		}
+	}
+
+	return false, nil
+}
+
+// This will change based on the state interference check
+func (api *RelayAPI) IsTraceToWEthDaiPair(callTrace common.CallTrace) (bool, error) {
+	if callTrace.To == nil {
+		return false, nil
+	}
+	if callTrace.Type == "STATICCALL" {
+		return false, nil
+	}
+
+	uniswapDaiWethAddress1 := api.defiAddresses[common.DaiWethPair1]
+	uniswapDaiWethAddress2 := api.defiAddresses[common.DaiWethPair2]
+	if *callTrace.To != uniswapDaiWethAddress1 && *callTrace.To != uniswapDaiWethAddress2 {
+		return false, nil
+	}
+
+	if len(callTrace.Input) < 4 {
+		return false, nil
+	}
+
+	// this will be the same across all environments
+	uniswapPairAbi, err := contracts.UniswapPairMetaData.GetAbi()
+	if err != nil {
+		return false, err
+	}
+	swapId := uniswapPairAbi.Methods["swap"].ID
+	if !bytes.Equal(callTrace.Input[:4], swapId) {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // simulateBlock sends a request for a block simulation to blockSimRateLimiter.
@@ -1719,21 +1777,16 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 		tx:  firstTx,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to get traces")
+		return fmt.Errorf("failed to get traces: %s", err.Error())
 	}
 
-	res, err := common.IsTxWEthDaiSwap(txTraces)
+	res, err := api.IsTxWEthDaiSwap(&txTraces.Result)
 	if err != nil {
-		return fmt.Errorf("failed to check if tx is a weth/dai swap")
+		return fmt.Errorf("failed to check if tx is a weth/dai swap: %s", err.Error())
 	}
 	if !res {
 		return fmt.Errorf("tx is not an weth/dai swap")
 	}
-
-	// This address is from the kurtosis local devnet. Need to expand state interference checks
-	//if *firstTx.To() != common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e") {
-	//	return fmt.Errorf("TOB tx can only be sent to uniswap v2 router")
-	//}
 
 	return nil
 }

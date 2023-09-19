@@ -27,10 +27,12 @@ var (
 	tobTxSubmitPath = "/relay/v1/builder/tob_txs"
 )
 
-func prepareBackend(backend *testBackend, slot uint64, parentHash string, feeRec types.Address, withdrawalsRoot []byte, prevRandao string, proposerPubkey phase0.BLSPubKey) {
+func prepareBackend(t *testing.T, backend *testBackend, slot uint64, parentHash string, feeRec types.Address, withdrawalsRoot []byte, prevRandao string, proposerPubkey phase0.BLSPubKey, network string) {
+	t.Helper()
 	headSlot := slot
 	submissionSlot := headSlot + 1
 
+	backend.relay.opts.EthNetDetails.Name = network
 	// Setup the test relay backend
 	backend.relay.headSlot.Store(headSlot)
 	backend.relay.capellaEpoch = 1
@@ -59,6 +61,7 @@ func prepareBackend(backend *testBackend, slot uint64, parentHash string, feeRec
 }
 
 func prepareBlockSubmitRequest(t *testing.T, payloadJSONFilename string, submissionSlot, submissionTimestamp uint64, backend *testBackend) *common.BuilderSubmitBlockRequest {
+	t.Helper()
 	// Prepare the request payload
 	req := new(common.BuilderSubmitBlockRequest)
 	requestPayloadJSONBytes := common.LoadGzippedBytes(t, payloadJSONFilename)
@@ -113,19 +116,194 @@ func assertTobTxs(t *testing.T, backend *testBackend, slot uint64, parentHash st
 
 }
 
+func TestIsTxWEthDaiSwap(t *testing.T) {
+	_, _, backend := startTestBackend(t)
+	headSlot := uint64(32)
+
+	// Payload attributes
+	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+	feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
+	require.NoError(t, err)
+	withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
+	require.NoError(t, err)
+	prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+	proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+	require.NoError(t, err)
+	proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+
+	tx1Contents := common.LoadFileContents(t, "../../testdata/traces/custom/tx1.json")
+	tx1 := new(gethtypes.Transaction)
+	err = tx1.UnmarshalJSON(tx1Contents)
+	require.NoError(t, err)
+
+	tx2Contents := common.LoadFileContents(t, "../../testdata/traces/custom/tx2.json")
+	tx2 := new(gethtypes.Transaction)
+	err = tx2.UnmarshalJSON(tx2Contents)
+	require.NoError(t, err)
+
+	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx1_trace.json")
+	tx1Trace := new(common.CallTrace)
+	err = json.Unmarshal(tx1TraceContents, tx1Trace)
+	require.NoError(t, err)
+
+	tx2TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx2_trace.json")
+	tx2Trace := new(common.CallTrace)
+	err = json.Unmarshal(tx2TraceContents, tx2Trace)
+	require.NoError(t, err)
+
+	cases := []struct {
+		description   string
+		callTraces    *common.CallTrace
+		tx            *gethtypes.Transaction
+		isTxCorrect   bool
+		requiredError string
+	}{
+		{
+			description:   "valid tx",
+			callTraces:    tx1Trace,
+			tx:            tx1,
+			isTxCorrect:   true,
+			requiredError: "",
+		},
+		{
+			description:   "invalid tx",
+			callTraces:    tx2Trace,
+			tx:            tx2,
+			isTxCorrect:   false,
+			requiredError: "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.description, func(t *testing.T) {
+			res, err := backend.relay.IsTxWEthDaiSwap(c.callTraces)
+			if c.requiredError != "" {
+				require.Contains(t, err.Error(), c.requiredError)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, c.isTxCorrect, res)
+			}
+
+		})
+	}
+}
+
+func TestIsTraceToWEthDaiPair(t *testing.T) {
+	_, _, backend := startTestBackend(t)
+	headSlot := uint64(32)
+
+	// Payload attributes
+	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
+	feeRec, err := types.HexToAddress("0x5cc0dde14e7256340cc820415a6022a7d1c93a35")
+	require.NoError(t, err)
+	withdrawalsRoot, err := hexutil.Decode("0xb15ed76298ff84a586b1d875df08b6676c98dfe9c7cd73fab88450348d8e70c8")
+	require.NoError(t, err)
+	prevRandao := "0x9962816e9d0a39fd4c80935338a741dc916d1545694e41eb5a505e1a3098f9e4"
+	proposerPubkeyByte, err := hexutil.Decode(testProposerKey)
+	require.NoError(t, err)
+	proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+
+	wethDaiTraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/weth_dai_trace.json")
+	wethDaiTrace := new(common.CallTrace)
+	err = json.Unmarshal(wethDaiTraceContents, wethDaiTrace)
+	require.NoError(t, err)
+
+	pairToDifferentAddress := new(common.CallTrace)
+	err = json.Unmarshal(wethDaiTraceContents, pairToDifferentAddress)
+	// some random address
+	pairToDifferentAddress.To = &uniswapV2Addr
+
+	wethDaiTraceDifferentMethod := new(common.CallTrace)
+	err = json.Unmarshal(wethDaiTraceContents, wethDaiTraceDifferentMethod)
+	wethDaiTraceDifferentMethod.Input = append([]byte("0x1234"), wethDaiTrace.Input[4:]...)
+
+	cases := []struct {
+		description    string
+		callTrace      common.CallTrace
+		isTraceCorrect bool
+		requiredError  string
+	}{
+		{
+			description:    "valid trace",
+			callTrace:      *wethDaiTrace,
+			isTraceCorrect: true,
+			requiredError:  "",
+		},
+		{
+			description: "static call trace",
+			callTrace: common.CallTrace{
+				Type: "STATICCALL",
+			},
+			isTraceCorrect: false,
+			requiredError:  "",
+		},
+		{
+			description:    "trace to different uniswap pair",
+			callTrace:      *pairToDifferentAddress,
+			isTraceCorrect: false,
+			requiredError:  "",
+		},
+		{
+			description:    "trace to correct uniswap pair but with different method",
+			callTrace:      *wethDaiTraceDifferentMethod,
+			isTraceCorrect: false,
+			requiredError:  "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.description, func(t *testing.T) {
+			res, err := backend.relay.IsTraceToWEthDaiPair(c.callTrace)
+			if c.requiredError != "" {
+				require.Contains(t, err.Error(), c.requiredError)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, c.isTraceCorrect, res)
+			}
+		})
+	}
+
+}
+
 // TODO - this test will keep evolving as we expand the state interference checks
 func TestCheckTxAndSenderValidity(t *testing.T) {
 	_, _, backend := startTestBackend(t)
 	randomAddress := common2.BytesToAddress([]byte("0xabc"))
 
+	tx1Contents := common.LoadFileContents(t, "../../testdata/traces/custom/tx1.json")
+	tx1 := new(gethtypes.Transaction)
+	err := tx1.UnmarshalJSON(tx1Contents)
+	require.NoError(t, err)
+
+	tx2Contents := common.LoadFileContents(t, "../../testdata/traces/custom/tx2.json")
+	tx2 := new(gethtypes.Transaction)
+	err = tx2.UnmarshalJSON(tx2Contents)
+	require.NoError(t, err)
+
+	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx1_trace.json")
+	tx1Trace := new(common.CallTrace)
+	err = json.Unmarshal(tx1TraceContents, tx1Trace)
+	require.NoError(t, err)
+
+	tx2TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx2_trace.json")
+	tx2Trace := new(common.CallTrace)
+	err = json.Unmarshal(tx2TraceContents, tx2Trace)
+	require.NoError(t, err)
+
 	cases := []struct {
 		description   string
 		txs           []*gethtypes.Transaction
+		callTraces    *common.CallTrace
 		requiredError string
 	}{
 		{
 			description:   "no txs sent",
 			txs:           []*gethtypes.Transaction{},
+			callTraces:    &common.CallTrace{},
 			requiredError: "Empty TOB tx request sent!",
 		},
 		{
@@ -140,6 +318,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			callTraces:    &common.CallTrace{},
 			requiredError: "We require a payment tx along with the TOB txs!",
 		},
 		{
@@ -162,6 +341,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			callTraces:    &common.CallTrace{},
 			requiredError: "we require a payment tx to the relayer along with the TOB txs",
 		},
 		{
@@ -184,6 +364,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			callTraces:    &common.CallTrace{},
 			requiredError: "the relayer payment tx is non-zero",
 		},
 		{
@@ -206,6 +387,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte("tx2"),
 				}),
 			},
+			callTraces:    &common.CallTrace{},
 			requiredError: "the relayer payment tx has malformed data",
 		},
 		{
@@ -236,6 +418,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			callTraces:    &common.CallTrace{},
 			requiredError: "we support only 1 tx on the TOB currently, got 3",
 		},
 		{
@@ -258,18 +441,19 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			callTraces:    &common.CallTrace{},
 			requiredError: "contract creation cannot be a TOB tx",
 		},
 		{
-			description: "ToB tx is not part of whitelist",
+			description: "Invalid ToB tx",
 			txs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    2,
-					GasPrice: big.NewInt(2),
-					Gas:      2,
-					To:       &randomAddress,
-					Value:    big.NewInt(2),
-					Data:     []byte("tx1"),
+					Nonce:    tx2.Nonce(),
+					GasPrice: tx2.GasPrice(),
+					Gas:      tx2.Gas(),
+					To:       tx2.To(),
+					Value:    tx2.Value(),
+					Data:     tx2.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
@@ -280,18 +464,19 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			requiredError: "TOB tx can only be sent to uniswap v2 router",
+			callTraces:    tx2Trace,
+			requiredError: "tx is not an weth/dai swap",
 		},
 		{
 			description: "Valid ToB txs",
 			txs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    2,
-					GasPrice: big.NewInt(2),
-					Gas:      2,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(2),
-					Data:     []byte("tx1"),
+					Nonce:    tx1.Nonce(),
+					GasPrice: tx1.GasPrice(),
+					Gas:      tx1.Gas(),
+					To:       tx1.To(),
+					Value:    tx1.Value(),
+					Data:     tx1.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
@@ -302,13 +487,19 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			callTraces:    tx1Trace,
 			requiredError: "",
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
-			err := backend.relay.checkTxAndSenderValidity(c.txs)
+			backend.relay.tracer = &MockTracer{
+				tracerError: "",
+				callTrace:   c.callTraces,
+			}
+
+			err := backend.relay.checkTxAndSenderValidity(c.txs, common.TestLog)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
 			} else {
@@ -322,11 +513,18 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 func TestSubmitTobTxsInSequence(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
+	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx1_trace.json")
+	tx1Trace := new(common.CallTrace)
+	err := json.Unmarshal(tx1TraceContents, tx1Trace)
+	require.NoError(t, err)
+
 	cases := []struct {
-		description      string
-		firstTobTxs      []*gethtypes.Transaction
-		secondTobTxs     []*gethtypes.Transaction
-		nextSentIsHigher bool
+		description        string
+		firstTobTxs        []*gethtypes.Transaction
+		firstTobTxsTraces  *common.CallTrace
+		secondTobTxs       []*gethtypes.Transaction
+		secondTobTxsTraces *common.CallTrace
+		nextSentIsHigher   bool
 	}{
 		{
 			description: "second set of tob txs is higher",
@@ -366,7 +564,9 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			nextSentIsHigher: true,
+			firstTobTxsTraces:  tx1Trace,
+			secondTobTxsTraces: tx1Trace,
+			nextSentIsHigher:   true,
 		},
 		{
 			description: "first set of txs is higher",
@@ -406,7 +606,9 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			nextSentIsHigher: false,
+			firstTobTxsTraces:  tx1Trace,
+			secondTobTxsTraces: tx1Trace,
+			nextSentIsHigher:   false,
 		},
 	}
 
@@ -426,7 +628,12 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			require.NoError(t, err)
 			proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
 
-			prepareBackend(backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey)
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+
+			backend.relay.tracer = &MockTracer{
+				tracerError: "",
+				callTrace:   c.firstTobTxsTraces,
+			}
 
 			// submit first set of tob txs
 			tobTxReqs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
@@ -453,6 +660,10 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			assertTobTxs(t, backend, headSlot+1, parentHash, c.firstTobTxs[len(c.firstTobTxs)-1].Value(), firstSetTxHashRoot)
 
 			// submit second set of txs
+			backend.relay.tracer = &MockTracer{
+				tracerError: "",
+				callTrace:   c.secondTobTxsTraces,
+			}
 			tobTxReqs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
 			for _, tx := range c.secondTobTxs {
 				txByte, err := tx.MarshalBinary()
@@ -486,9 +697,20 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 func TestSubmitTobTxs(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
+	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx1_trace.json")
+	tx1Trace := new(common.CallTrace)
+	err := json.Unmarshal(tx1TraceContents, tx1Trace)
+	require.NoError(t, err)
+
+	tx2TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx2_trace.json")
+	tx2Trace := new(common.CallTrace)
+	err = json.Unmarshal(tx2TraceContents, tx2Trace)
+	require.NoError(t, err)
+
 	cases := []struct {
 		description   string
 		tobTxs        []*gethtypes.Transaction
+		traces        *common.CallTrace
 		requiredError string
 		slotDelta     uint64
 	}{
@@ -505,6 +727,7 @@ func TestSubmitTobTxs(t *testing.T) {
 				}),
 			},
 			requiredError: "We require a payment tx along with the TOB txs!",
+			traces:        nil,
 			slotDelta:     1,
 		},
 		{
@@ -528,6 +751,7 @@ func TestSubmitTobTxs(t *testing.T) {
 				}),
 			},
 			requiredError: "we require a payment tx to the relayer along with the TOB txs",
+			traces:        nil,
 			slotDelta:     1,
 		},
 		{
@@ -550,7 +774,8 @@ func TestSubmitTobTxs(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			requiredError: "TOB tx can only be sent to uniswap v2 router",
+			traces:        tx2Trace,
+			requiredError: "tx is not an weth/dai swap",
 			slotDelta:     1,
 		},
 		{
@@ -573,6 +798,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			traces:        nil,
 			requiredError: "Slot's TOB bid not yet started!!",
 			slotDelta:     2,
 		},
@@ -581,6 +807,7 @@ func TestSubmitTobTxs(t *testing.T) {
 			tobTxs:        []*gethtypes.Transaction{},
 			requiredError: "Empty TOB tx request sent",
 			slotDelta:     1,
+			traces:        nil,
 		},
 		{
 			description: "Valid TobTxs sent",
@@ -602,6 +829,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			traces:        tx1Trace,
 			requiredError: "",
 			slotDelta:     1,
 		},
@@ -624,7 +852,12 @@ func TestSubmitTobTxs(t *testing.T) {
 			require.NoError(t, err)
 			proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
 
-			prepareBackend(backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey)
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+			if c.traces == nil {
+				backend.relay.tracer = &MockTracer{tracerError: "no traces available", callTrace: nil}
+			} else {
+				backend.relay.tracer = &MockTracer{tracerError: "", callTrace: c.traces}
+			}
 
 			tobTxReqs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
 			for _, tx := range c.tobTxs {
@@ -717,11 +950,18 @@ func assertBlock(t *testing.T, backend *testBackend, headSlot uint64, parentHash
 func TestSubmitBuilderBlockInSequence(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
+	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx1_trace.json")
+	tx1Trace := new(common.CallTrace)
+	err := json.Unmarshal(tx1TraceContents, tx1Trace)
+	require.NoError(t, err)
+
 	cases := []struct {
-		description      string
-		firstTobTxs      []*gethtypes.Transaction
-		secondTobTxs     []*gethtypes.Transaction
-		nextSentIsHigher bool
+		description        string
+		firstTobTxs        []*gethtypes.Transaction
+		firstTobTxsTraces  *common.CallTrace
+		secondTobTxs       []*gethtypes.Transaction
+		secondTobTxsTraces *common.CallTrace
+		nextSentIsHigher   bool
 	}{
 		{
 			description: "second set of tob txs is higher",
@@ -761,7 +1001,9 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			nextSentIsHigher: true,
+			firstTobTxsTraces:  tx1Trace,
+			secondTobTxsTraces: tx1Trace,
+			nextSentIsHigher:   true,
 		},
 		{
 			description: "first set of txs is higher",
@@ -801,7 +1043,9 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			nextSentIsHigher: false,
+			firstTobTxsTraces:  tx1Trace,
+			secondTobTxsTraces: tx1Trace,
+			nextSentIsHigher:   false,
 		},
 	}
 
@@ -826,7 +1070,13 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			require.NoError(t, err)
 			proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
 
-			prepareBackend(backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey)
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+
+			backend.relay.tracer = &MockTracer{
+				tracerError: "",
+				callTrace:   c.firstTobTxsTraces,
+			}
+
 			// submit the first ToB txs
 			txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
 			require.NoError(t, err)
@@ -872,6 +1122,10 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq, totalExpectedBidValue, c.firstTobTxs)
 
 			// submit the second set of ToB txs
+			backend.relay.tracer = &MockTracer{
+				tracerError: "",
+				callTrace:   c.secondTobTxsTraces,
+			}
 			txs = bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
 			require.NoError(t, err)
 			for _, tx := range c.secondTobTxs {
@@ -928,14 +1182,36 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 func TestSubmitBuilderBlock(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
+	tx1Contents := common.LoadFileContents(t, "../../testdata/traces/custom/tx1.json")
+	tx1 := new(gethtypes.Transaction)
+	err := tx1.UnmarshalJSON(tx1Contents)
+	require.NoError(t, err)
+
+	tx2Contents := common.LoadFileContents(t, "../../testdata/traces/custom/tx2.json")
+	tx2 := new(gethtypes.Transaction)
+	err = tx2.UnmarshalJSON(tx2Contents)
+	require.NoError(t, err)
+
+	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx1_trace.json")
+	tx1Trace := new(common.CallTrace)
+	err = json.Unmarshal(tx1TraceContents, tx1Trace)
+	require.NoError(t, err)
+
+	tx2TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/tx2_trace.json")
+	tx2Trace := new(common.CallTrace)
+	err = json.Unmarshal(tx2TraceContents, tx2Trace)
+	require.NoError(t, err)
+
 	cases := []struct {
 		description   string
 		tobTxs        []*gethtypes.Transaction
+		traces        *common.CallTrace
 		requiredError string
 	}{
 		{
 			description:   "No ToB txs",
 			tobTxs:        []*gethtypes.Transaction{},
+			traces:        nil,
 			requiredError: "",
 		},
 		{
@@ -958,6 +1234,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			traces:        tx1Trace,
 			requiredError: "",
 		},
 	}
@@ -983,7 +1260,19 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			require.NoError(t, err)
 			proposerPubkey := phase0.BLSPubKey(proposerPubkeyByte)
 
-			prepareBackend(backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey)
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+
+			if c.traces != nil {
+				backend.relay.tracer = &MockTracer{
+					tracerError: "",
+					callTrace:   c.traces,
+				}
+			} else {
+				backend.relay.tracer = &MockTracer{
+					tracerError: "no traces available",
+					callTrace:   nil,
+				}
+			}
 
 			// create the ToB txs
 			tobTxsValue := big.NewInt(0)

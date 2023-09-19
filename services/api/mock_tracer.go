@@ -20,6 +20,10 @@ func NewMockTracer(tracerError string, callTrace *common.CallTrace) *MockTracer 
 	}
 }
 
-func (t *MockTracer) TraceTx(context context.Context, tx *types.Transaction) (*common.CallTrace, error, error) {
-	return t.callTrace, nil, fmt.Errorf(t.tracerError)
+func (t *MockTracer) TraceTx(context context.Context, tx *types.Transaction) (*common.CallTraceResponse, error) {
+	fmt.Printf("mock tracer called with tx %v\n", tx)
+	if t.tracerError == "" {
+		return &common.CallTraceResponse{Result: *t.callTrace}, nil
+	}
+	return &common.CallTraceResponse{Result: *t.callTrace}, fmt.Errorf(t.tracerError)
 }
