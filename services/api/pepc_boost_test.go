@@ -164,25 +164,6 @@ func TestIsTxWEthDaiSwap(t *testing.T) {
 
 	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
 
-	//tx1Contents := common.LoadFileContents(t, "../../testdata/traces/custom/valid_weth_dai_tx.json")
-	//tx1 := new(gethtypes.Transaction)
-	//err := tx1.UnmarshalJSON(tx1Contents)
-	//require.NoError(t, err)
-	//
-	//tx2Contents := common.LoadFileContents(t, "../../testdata/traces/custom/invalid_weth_dai_tx.json")
-	//tx2 := new(gethtypes.Transaction)
-	//err = tx2.UnmarshalJSON(tx2Contents)
-	//require.NoError(t, err)
-	//
-	//tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/valid_weth_dai_tx_trace.json")
-	//tx1Trace := new(common.CallTrace)
-	//err = json.Unmarshal(tx1TraceContents, tx1Trace)
-	//require.NoError(t, err)
-	//
-	//tx2TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/invalid_weth_dai_tx_trace.json")
-	//tx2Trace := new(common.CallTrace)
-	//err = json.Unmarshal(tx2TraceContents, tx2Trace)
-	//require.NoError(t, err)
 	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetTracingRelatedTestData(t)
 
 	cases := []struct {
@@ -518,10 +499,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 func TestSubmitTobTxsInSequence(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
-	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/valid_weth_dai_tx_trace.json")
-	tx1Trace := new(common.CallTrace)
-	err := json.Unmarshal(tx1TraceContents, tx1Trace)
-	require.NoError(t, err)
+	_, validWethDaiTxTrace, _, _ := GetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description        string
@@ -569,8 +547,8 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			firstTobTxsTraces:  tx1Trace,
-			secondTobTxsTraces: tx1Trace,
+			firstTobTxsTraces:  validWethDaiTxTrace,
+			secondTobTxsTraces: validWethDaiTxTrace,
 			nextSentIsHigher:   true,
 		},
 		{
@@ -611,8 +589,8 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			firstTobTxsTraces:  tx1Trace,
-			secondTobTxsTraces: tx1Trace,
+			firstTobTxsTraces:  validWethDaiTxTrace,
+			secondTobTxsTraces: validWethDaiTxTrace,
 			nextSentIsHigher:   false,
 		},
 	}
@@ -693,15 +671,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 func TestSubmitTobTxs(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
-	tx1TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/valid_weth_dai_tx_trace.json")
-	tx1Trace := new(common.CallTrace)
-	err := json.Unmarshal(tx1TraceContents, tx1Trace)
-	require.NoError(t, err)
-
-	tx2TraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/invalid_weth_dai_tx_trace.json")
-	tx2Trace := new(common.CallTrace)
-	err = json.Unmarshal(tx2TraceContents, tx2Trace)
-	require.NoError(t, err)
+	_, validWethDaiTxTrace, _, invalidWethDaiTrace := GetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
@@ -770,7 +740,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			traces:        tx2Trace,
+			traces:        invalidWethDaiTrace,
 			requiredError: "tx is not an weth/dai swap",
 			slotDelta:     1,
 		},
@@ -825,7 +795,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			traces:        tx1Trace,
+			traces:        validWethDaiTxTrace,
 			requiredError: "",
 			slotDelta:     1,
 		},
