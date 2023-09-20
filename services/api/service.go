@@ -37,6 +37,7 @@ import (
 	"github.com/flashbots/go-utils/httplogger"
 	"github.com/flashbots/mev-boost-relay/beaconclient"
 	"github.com/flashbots/mev-boost-relay/common"
+	"github.com/flashbots/mev-boost-relay/contracts"
 	"github.com/flashbots/mev-boost-relay/database"
 	"github.com/flashbots/mev-boost-relay/datastore"
 	"github.com/go-redis/redis/v9"
@@ -183,6 +184,16 @@ type blockAssemblyResult struct {
 	validationErr    error
 }
 
+type tracerOptions struct {
+	log *logrus.Entry
+	tx  *types.Transaction
+}
+
+type tracerResult struct {
+	tracerResponse *common.CallTraceResponse
+	tracerError    error
+}
+
 // RelayAPI represents a single Relay instance
 type RelayAPI struct {
 	opts RelayAPIOpts
@@ -216,6 +227,7 @@ type RelayAPI struct {
 
 	blockSimRateLimiter IBlockSimRateLimiter
 	blockAssembler      IBlockAssembler
+	tracer              ITracer
 
 	validatorRegC chan boostTypes.SignedValidatorRegistration
 
@@ -242,6 +254,30 @@ type RelayAPI struct {
 	optimisticBlocksWG sync.WaitGroup
 	// Cache for builder statuses and collaterals.
 	blockBuildersCache map[string]*blockBuilderCacheEntry
+
+	// stores DeFi contract addresses rquired for state interference checks
+	defiAddresses map[string]common2.Address
+}
+
+func FillUpDefiAddresses(opts RelayAPIOpts) map[string]common2.Address {
+	defiAddresses := make(map[string]common2.Address)
+
+	if opts.EthNetDetails.Name == "mainnet" {
+		// TODO - fill up mainnet defi addresses
+	} else if opts.EthNetDetails.Name == "goerli" {
+		// TODO - fill up goerli addresses
+	}
+
+	defiAddresses[common.DaiToken] = common2.HexToAddress("0xAb2A01BC351770D09611Ac80f1DE076D56E0487d")
+	defiAddresses[common.WethToken] = common2.HexToAddress("0x4c849Ff66a6F0A954cbf7818b8a763105C2787D6")
+
+	// this is only in custom kurtosis devnets
+	defiAddresses[common.DaiWethPair1] = common2.HexToAddress("0x0D6b80a9Cefc2C58308F0Adc26586E550E4422ef")
+	defiAddresses[common.UniswapFactory1] = common2.HexToAddress("0xBFF5cD0aA560e1d1C6B1E2C347860aDAe1bd8235")
+	defiAddresses[common.DaiWethPair2] = common2.HexToAddress("0x2ed2B47342450C006F83913a422F7C2BDAB8377a")
+	defiAddresses[common.UniswapFactory2] = common2.HexToAddress("0x6bEaE43B589D986d127Bd2BdAcF4e24C41C5C035")
+
+	return defiAddresses
 }
 
 // NewRelayAPI creates a new service. if builders is nil, allow any builder
@@ -307,8 +343,11 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 		proposerDutiesResponse: &[]byte{},
 		blockSimRateLimiter:    NewBlockSimulationRateLimiter(opts.BlockSimURL),
 		blockAssembler:         NewBlockAssembler(opts.BlockSimURL),
+		tracer:                 NewTracer(opts.BlockSimURL),
 
 		validatorRegC: make(chan boostTypes.SignedValidatorRegistration, 450_000),
+
+		defiAddresses: FillUpDefiAddresses(opts),
 	}
 
 	if os.Getenv("FORCE_GET_HEADER_204") == "1" {
@@ -572,6 +611,77 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 			}).Error("error saving validator registration")
 		}
 	}
+}
+
+// just check if it goes to the DaiWethPair with a swap tx
+func (api *RelayAPI) IsTxWEthDaiSwap(trace *common.CallTrace) (bool, error) {
+	stack := []common.CallTrace{*trace}
+
+	for len(stack) > 0 {
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		res, err := api.IsTraceToWEthDaiPair(current)
+		if err != nil {
+			return false, err
+		}
+		// we found a weth/dai swap i.e the tx contains a weth/dai swap
+		if res {
+			return true, nil
+		}
+
+		for _, call := range current.Calls {
+			stack = append(stack, call)
+		}
+	}
+
+	return false, nil
+}
+
+// This will change based on the state interference check
+func (api *RelayAPI) IsTraceToWEthDaiPair(callTrace common.CallTrace) (bool, error) {
+	if callTrace.To == nil {
+		return false, nil
+	}
+	if callTrace.Type == "STATICCALL" {
+		return false, nil
+	}
+
+	uniswapDaiWethAddress1 := api.defiAddresses[common.DaiWethPair1]
+	uniswapDaiWethAddress2 := api.defiAddresses[common.DaiWethPair2]
+	if *callTrace.To != uniswapDaiWethAddress1 && *callTrace.To != uniswapDaiWethAddress2 {
+		return false, nil
+	}
+
+	if len(callTrace.Input) < 4 {
+		return false, nil
+	}
+
+	// this will be the same across all environments
+	uniswapPairAbi, err := contracts.UniswapPairMetaData.GetAbi()
+	if err != nil {
+		return false, err
+	}
+	swapId := uniswapPairAbi.Methods["swap"].ID
+	if !bytes.Equal(callTrace.Input[:4], swapId) {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func (api *RelayAPI) getTraces(ctx context.Context, opts tracerOptions) (*common.CallTraceResponse, error) {
+	t := time.Now()
+	res, err := api.tracer.TraceTx(ctx, opts.tx)
+	log := opts.log.WithFields(logrus.Fields{
+		"durationMs": time.Since(t).Milliseconds(),
+	})
+	if err != nil {
+		log.WithError(err).Warn("tracer failed")
+		return nil, err
+	}
+	log.Info("tracer successful")
+	return res, nil
 }
 
 // simulateBlock sends a request for a block simulation to blockSimRateLimiter.
@@ -1651,30 +1761,40 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 }
 
 // Checks the quality of the TOB txs, if it is the txs expected in a TOB
-func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction) error {
+func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log *logrus.Entry) error {
 	if len(txs) > 2 {
 		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
 	}
 
+	// get traces
 	firstTx := txs[0]
+	// some sanity checks
 	if firstTx.To() == nil {
 		return fmt.Errorf("contract creation cannot be a TOB tx")
 	}
-	// This address is from the kurtosis local devnet. Need to expand state interference checks
-	if *firstTx.To() != common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e") {
-		return fmt.Errorf("TOB tx can only be sent to uniswap v2 router")
+
+	txTraces, err := api.getTraces(context.Background(), tracerOptions{
+		log: log,
+		tx:  firstTx,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get traces: %s", err.Error())
 	}
 
-	// TODO - add check for whether the tx is a eth/usdc swap
+	res, err := api.IsTxWEthDaiSwap(&txTraces.Result)
+	if err != nil {
+		return fmt.Errorf("failed to check if tx is a weth/dai swap: %s", err.Error())
+	}
+	if !res {
+		return fmt.Errorf("tx is not an weth/dai swap")
+	}
+
 	return nil
 }
 
 // This method first checks whether the payouts are valid, then checks whether the txs are valid w.r.t state interference
-func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction) error {
+func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *logrus.Entry) error {
 	// TODO - Payouts still need to be modelled
-	// TODO - check all the txs to see if the nonce is valid, value is valid, check if the tx has already been included. These can be confirmed from the
-	// execution layer. We should ideally
-	// TODO - expand state interference checks as in checkTobTxsStateInterference
 
 	if len(txs) == 0 {
 		return fmt.Errorf("Empty TOB tx request sent!")
@@ -1697,7 +1817,7 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction) error {
 	}
 
 	// State interference checks
-	return api.checkTobTxsStateInterference(txs)
+	return api.checkTobTxsStateInterference(txs, log)
 }
 
 func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Request) {
@@ -1777,7 +1897,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	err = api.checkTxAndSenderValidity(txs)
+	err = api.checkTxAndSenderValidity(txs, log)
 	if err != nil {
 		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
