@@ -920,7 +920,6 @@ func (b *BlockAssemblerRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// callLog is the result of LOG opCode
 type CallLog struct {
 	Address common.Address `json:"address"`
 	Topics  []common.Hash  `json:"topics"`
@@ -945,12 +944,4 @@ type CallTrace struct {
 
 type CallTraceResponse struct {
 	Result CallTrace `json:"result"`
-}
-
-func (c *CallTraceResponse) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c)
-}
-
-func (c *CallTraceResponse) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, &c)
 }
