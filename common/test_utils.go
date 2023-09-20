@@ -113,3 +113,10 @@ func MustB64Gunzip(s string) []byte {
 	}
 	return output
 }
+
+func LoadFileContents(t *testing.T, filename string) []byte {
+	t.Helper()
+	fileContents, err := os.ReadFile(filename)
+	require.NoError(t, err)
+	return fileContents
+}
