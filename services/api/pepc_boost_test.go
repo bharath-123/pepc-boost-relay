@@ -117,7 +117,7 @@ func assertTobTxs(t *testing.T, backend *testBackend, slot uint64, parentHash st
 
 }
 
-func GetTracingRelatedTestData(t *testing.T) (*gethtypes.Transaction, *common.CallTrace, *gethtypes.Transaction, *common.CallTrace) {
+func GetCustomDevnetTracingRelatedTestData(t *testing.T) (*gethtypes.Transaction, *common.CallTrace, *gethtypes.Transaction, *common.CallTrace) {
 	validWethDaiTxContents := common.LoadFileContents(t, "../../testdata/traces/custom/valid_weth_dai_tx.json")
 	validWethDaiTx := new(gethtypes.Transaction)
 	err := validWethDaiTx.UnmarshalJSON(validWethDaiTxContents)
@@ -159,18 +159,14 @@ func GetTestPayloadAttributes(t *testing.T) (string, types.Address, []byte, stri
 func TestIsTxWEthDaiSwap(t *testing.T) {
 	_, _, backend := startTestBackend(t)
 
-	// Payload attributes
-	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
-
-	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
-
-	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetTracingRelatedTestData(t)
+	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
 		callTraces    *common.CallTrace
 		tx            *gethtypes.Transaction
 		isTxCorrect   bool
+		network       string
 		requiredError string
 	}{
 		{
@@ -178,6 +174,7 @@ func TestIsTxWEthDaiSwap(t *testing.T) {
 			callTraces:    validWethDaiTxTrace,
 			tx:            validWethDaiTx,
 			isTxCorrect:   true,
+			network:       "custom",
 			requiredError: "",
 		},
 		{
@@ -185,12 +182,18 @@ func TestIsTxWEthDaiSwap(t *testing.T) {
 			callTraces:    invalidWethDaiTrace,
 			tx:            invalidWethDaiTx,
 			isTxCorrect:   false,
+			network:       "custom",
 			requiredError: "",
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
+			// Payload attributes
+			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
+
 			res, err := backend.relay.IsTxWEthDaiSwap(c.callTraces)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
@@ -203,6 +206,7 @@ func TestIsTxWEthDaiSwap(t *testing.T) {
 	}
 }
 
+// this is only for custom network
 func TestIsTraceToWEthDaiPair(t *testing.T) {
 	_, _, backend := startTestBackend(t)
 
@@ -273,12 +277,9 @@ func TestIsTraceToWEthDaiPair(t *testing.T) {
 
 }
 
-// TODO - this test will keep evolving as we expand the state interference checks
-func TestCheckTxAndSenderValidity(t *testing.T) {
+func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 	_, _, backend := startTestBackend(t)
 	randomAddress := common2.BytesToAddress([]byte("0xabc"))
-
-	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
@@ -430,6 +431,36 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 			callTraces:    nil,
 			requiredError: "contract creation cannot be a TOB tx",
 		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.description, func(t *testing.T) {
+			backend.relay.tracer = &MockTracer{
+				tracerError: "",
+				callTrace:   c.callTraces,
+			}
+
+			err := backend.relay.checkTxAndSenderValidity(c.txs, common.TestLog)
+			if c.requiredError != "" {
+				require.Contains(t, err.Error(), c.requiredError)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
+	_, _, backend := startTestBackend(t)
+
+	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
+
+	cases := []struct {
+		description   string
+		txs           []*gethtypes.Transaction
+		callTraces    *common.CallTrace
+		requiredError string
+	}{
 		{
 			description: "Invalid ToB tx",
 			txs: []*gethtypes.Transaction{
@@ -451,7 +482,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 				}),
 			},
 			callTraces:    invalidWethDaiTrace,
-			requiredError: "tx is not an weth/dai swap",
+			requiredError: "not a valid tob tx",
 		},
 		{
 			description: "Valid ToB txs",
@@ -485,6 +516,10 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 				callTrace:   c.callTraces,
 			}
 
+			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+
 			err := backend.relay.checkTxAndSenderValidity(c.txs, common.TestLog)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
@@ -499,7 +534,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 func TestSubmitTobTxsInSequence(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
-	_, validWethDaiTxTrace, _, _ := GetTracingRelatedTestData(t)
+	_, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description        string
@@ -507,6 +542,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 		firstTobTxsTraces  *common.CallTrace
 		secondTobTxs       []*gethtypes.Transaction
 		secondTobTxsTraces *common.CallTrace
+		network            string
 		nextSentIsHigher   bool
 	}{
 		{
@@ -549,6 +585,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			},
 			firstTobTxsTraces:  validWethDaiTxTrace,
 			secondTobTxsTraces: validWethDaiTxTrace,
+			network:            "custom",
 			nextSentIsHigher:   true,
 		},
 		{
@@ -591,6 +628,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			},
 			firstTobTxsTraces:  validWethDaiTxTrace,
 			secondTobTxsTraces: validWethDaiTxTrace,
+			network:            "custom",
 			nextSentIsHigher:   false,
 		},
 	}
@@ -602,7 +640,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
-			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
 			backend.relay.tracer = &MockTracer{
 				tracerError: "",
@@ -671,13 +709,14 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 func TestSubmitTobTxs(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
-	_, validWethDaiTxTrace, _, invalidWethDaiTrace := GetTracingRelatedTestData(t)
+	_, validWethDaiTxTrace, _, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
 		tobTxs        []*gethtypes.Transaction
 		traces        *common.CallTrace
 		requiredError string
+		network       string
 		slotDelta     uint64
 	}{
 		{
@@ -694,6 +733,7 @@ func TestSubmitTobTxs(t *testing.T) {
 			},
 			requiredError: "We require a payment tx along with the TOB txs!",
 			traces:        nil,
+			network:       "custom",
 			slotDelta:     1,
 		},
 		{
@@ -718,6 +758,7 @@ func TestSubmitTobTxs(t *testing.T) {
 			},
 			requiredError: "we require a payment tx to the relayer along with the TOB txs",
 			traces:        nil,
+			network:       "custom",
 			slotDelta:     1,
 		},
 		{
@@ -741,7 +782,8 @@ func TestSubmitTobTxs(t *testing.T) {
 				}),
 			},
 			traces:        invalidWethDaiTrace,
-			requiredError: "tx is not an weth/dai swap",
+			requiredError: "not a valid tob tx",
+			network:       "custom",
 			slotDelta:     1,
 		},
 		{
@@ -766,12 +808,14 @@ func TestSubmitTobTxs(t *testing.T) {
 			},
 			traces:        nil,
 			requiredError: "Slot's TOB bid not yet started!!",
+			network:       "custom",
 			slotDelta:     2,
 		},
 		{
 			description:   "No txs sent",
 			tobTxs:        []*gethtypes.Transaction{},
 			requiredError: "Empty TOB tx request sent",
+			network:       "custom",
 			slotDelta:     1,
 			traces:        nil,
 		},
@@ -796,6 +840,7 @@ func TestSubmitTobTxs(t *testing.T) {
 				}),
 			},
 			traces:        validWethDaiTxTrace,
+			network:       "custom",
 			requiredError: "",
 			slotDelta:     1,
 		},
@@ -807,7 +852,7 @@ func TestSubmitTobTxs(t *testing.T) {
 
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
-			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 			if c.traces == nil {
 				backend.relay.tracer = &MockTracer{tracerError: "no traces available", callTrace: nil}
 			} else {
@@ -905,7 +950,7 @@ func assertBlock(t *testing.T, backend *testBackend, headSlot uint64, parentHash
 func TestSubmitBuilderBlockInSequence(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
-	_, validWethDaiTxTrace, _, _ := GetTracingRelatedTestData(t)
+	_, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description        string
@@ -913,6 +958,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 		firstTobTxsTraces  *common.CallTrace
 		secondTobTxs       []*gethtypes.Transaction
 		secondTobTxsTraces *common.CallTrace
+		network            string
 		nextSentIsHigher   bool
 	}{
 		{
@@ -955,6 +1001,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			},
 			firstTobTxsTraces:  validWethDaiTxTrace,
 			secondTobTxsTraces: validWethDaiTxTrace,
+			network:            "custom",
 			nextSentIsHigher:   true,
 		},
 		{
@@ -997,6 +1044,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			},
 			firstTobTxsTraces:  validWethDaiTxTrace,
 			secondTobTxsTraces: validWethDaiTxTrace,
+			network:            "custom",
 			nextSentIsHigher:   false,
 		},
 	}
@@ -1010,7 +1058,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			submissionSlot := headSlot + 1
 			submissionTimestamp := 1606824419
 
-			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
 			backend.relay.tracer = &MockTracer{
 				tracerError: "",
@@ -1121,7 +1169,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 func TestSubmitBuilderBlock(t *testing.T) {
 	backend := newTestBackend(t, 1)
 
-	validWethDaiTx, validWethDaiTxTrace, _, _ := GetTracingRelatedTestData(t)
+	validWethDaiTx, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
