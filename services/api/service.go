@@ -613,6 +613,15 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 	}
 }
 
+// TODO - come up with better name? state interference is not really descriptive name
+func (api *RelayAPI) StateInterferenceChecks(trace *common.CallTrace) (bool, error) {
+	if api.opts.EthNetDetails.Name == "custom" {
+		return api.IsTxWEthDaiSwap(trace)
+	}
+
+	return false, fmt.Errorf("state interference checks not implemented for %s", api.opts.EthNetDetails.Name)
+}
+
 // just check if it goes to the DaiWethPair with a swap tx
 func (api *RelayAPI) IsTxWEthDaiSwap(trace *common.CallTrace) (bool, error) {
 	stack := []common.CallTrace{*trace}
@@ -1781,12 +1790,12 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 		return fmt.Errorf("failed to get traces: %s", err.Error())
 	}
 
-	res, err := api.IsTxWEthDaiSwap(&txTraces.Result)
+	res, err := api.StateInterferenceChecks(&txTraces.Result)
 	if err != nil {
-		return fmt.Errorf("failed to check if tx is a weth/dai swap: %s", err.Error())
+		return fmt.Errorf("state interference checks failed with: %s", err.Error())
 	}
 	if !res {
-		return fmt.Errorf("tx is not an weth/dai swap")
+		return fmt.Errorf("not a valid tob tx")
 	}
 
 	return nil
