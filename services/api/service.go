@@ -265,17 +265,20 @@ func FillUpDefiAddresses(opts RelayAPIOpts) map[string]common2.Address {
 	if opts.EthNetDetails.Name == "mainnet" {
 		// TODO - fill up mainnet defi addresses
 	} else if opts.EthNetDetails.Name == "goerli" {
-		// TODO - fill up goerli addresses
+		defiAddresses[common.WethToken] = common2.HexToAddress("0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6")
+		defiAddresses[common.UsdcToken] = common2.HexToAddress("0x07865c6e87b9f70255377e024ace6630c1eaa37f")
+		defiAddresses[common.UniV3SwapRouter] = common2.HexToAddress("0x1F98431c8aD98523631AE4a59f267346ea31F984")
+	} else if opts.EthNetDetails.Name == "custom" {
+
+		defiAddresses[common.DaiToken] = common2.HexToAddress("0xAb2A01BC351770D09611Ac80f1DE076D56E0487d")
+		defiAddresses[common.WethToken] = common2.HexToAddress("0x4c849Ff66a6F0A954cbf7818b8a763105C2787D6")
+
+		// this is only in custom kurtosis devnets
+		defiAddresses[common.DaiWethPair1] = common2.HexToAddress("0x0D6b80a9Cefc2C58308F0Adc26586E550E4422ef")
+		defiAddresses[common.UniswapFactory1] = common2.HexToAddress("0xBFF5cD0aA560e1d1C6B1E2C347860aDAe1bd8235")
+		defiAddresses[common.DaiWethPair2] = common2.HexToAddress("0x2ed2B47342450C006F83913a422F7C2BDAB8377a")
+		defiAddresses[common.UniswapFactory2] = common2.HexToAddress("0x6bEaE43B589D986d127Bd2BdAcF4e24C41C5C035")
 	}
-
-	defiAddresses[common.DaiToken] = common2.HexToAddress("0xAb2A01BC351770D09611Ac80f1DE076D56E0487d")
-	defiAddresses[common.WethToken] = common2.HexToAddress("0x4c849Ff66a6F0A954cbf7818b8a763105C2787D6")
-
-	// this is only in custom kurtosis devnets
-	defiAddresses[common.DaiWethPair1] = common2.HexToAddress("0x0D6b80a9Cefc2C58308F0Adc26586E550E4422ef")
-	defiAddresses[common.UniswapFactory1] = common2.HexToAddress("0xBFF5cD0aA560e1d1C6B1E2C347860aDAe1bd8235")
-	defiAddresses[common.DaiWethPair2] = common2.HexToAddress("0x2ed2B47342450C006F83913a422F7C2BDAB8377a")
-	defiAddresses[common.UniswapFactory2] = common2.HexToAddress("0x6bEaE43B589D986d127Bd2BdAcF4e24C41C5C035")
 
 	return defiAddresses
 }
