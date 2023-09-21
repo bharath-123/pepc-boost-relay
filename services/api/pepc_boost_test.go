@@ -194,7 +194,7 @@ func TestIsTxWEthDaiSwap(t *testing.T) {
 
 			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
-			res, err := backend.relay.IsTxWEthDaiSwap(c.callTraces)
+			res, err := backend.relay.StateInterferenceChecks(c.callTraces)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
 			} else {

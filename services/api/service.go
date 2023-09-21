@@ -616,21 +616,23 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 // TODO - come up with better name? state interference is not really descriptive name
 func (api *RelayAPI) StateInterferenceChecks(trace *common.CallTrace) (bool, error) {
 	if api.opts.EthNetDetails.Name == "custom" {
-		return api.IsTxWEthDaiSwap(trace)
+		return api.TraceChecker(trace, api.IsTraceToWEthDaiPair)
+	} else if api.opts.EthNetDetails.Name == "goerli" {
+		return api.TraceChecker(trace, api.IsTraceUniV3EthUsdcSwap)
 	}
 
 	return false, fmt.Errorf("state interference checks not implemented for %s", api.opts.EthNetDetails.Name)
 }
 
 // just check if it goes to the DaiWethPair with a swap tx
-func (api *RelayAPI) IsTxWEthDaiSwap(trace *common.CallTrace) (bool, error) {
+func (api *RelayAPI) TraceChecker(trace *common.CallTrace, f common.NetworkStateInterferenceChecker) (bool, error) {
 	stack := []common.CallTrace{*trace}
 
 	for len(stack) > 0 {
 		current := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
-		res, err := api.IsTraceToWEthDaiPair(current)
+		res, err := f(current)
 		if err != nil {
 			return false, err
 		}
@@ -647,22 +649,74 @@ func (api *RelayAPI) IsTxWEthDaiSwap(trace *common.CallTrace) (bool, error) {
 	return false, nil
 }
 
-// This will change based on the state interference check
-func (api *RelayAPI) IsTraceToWEthDaiPair(callTrace common.CallTrace) (bool, error) {
+func (api *RelayAPI) BaseTraceChecks(callTrace common.CallTrace) (bool, error) {
 	if callTrace.To == nil {
 		return false, nil
 	}
 	if callTrace.Type == "STATICCALL" {
 		return false, nil
 	}
+	if len(callTrace.Input) < 4 {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func (api *RelayAPI) IsTraceUniV3EthUsdcSwap(callTrace common.CallTrace) (bool, error) {
+	isValid, err := api.BaseTraceChecks(callTrace)
+	if err != nil {
+		return false, err
+	}
+	if !isValid {
+		return false, nil
+	}
+
+	if *callTrace.To != api.defiAddresses[common.UniV3SwapRouter] {
+		return false, nil
+	}
+
+	uniV3SwapRouterAbi, err := contracts.UniswapV3SwapRouterMetaData.GetAbi()
+	if err != nil {
+		return false, err
+	}
+	exactInputSingleId := uniV3SwapRouterAbi.Methods["exactInputSingle"].ID
+	if !bytes.Equal(callTrace.Input[:4], exactInputSingleId) {
+		return false, nil
+	}
+
+	// unpack the args
+	args, err := common.GetMethodArgs(callTrace.Input, "exactInputSingle", uniV3SwapRouterAbi)
+	if err != nil {
+		return false, err
+	}
+	swapRouterParams, ok := args.(contracts.ISwapRouterExactInputSingleParams)
+	if !ok {
+		return false, fmt.Errorf("failed to parse args of swapRouter tx to ISwapRouterExactInputSingleParams")
+	}
+	if swapRouterParams.TokenIn != api.defiAddresses[common.WethToken] || swapRouterParams.TokenOut != api.defiAddresses[common.UsdcToken] {
+		return false, nil
+	}
+	if swapRouterParams.TokenOut != api.defiAddresses[common.UsdcToken] || swapRouterParams.TokenOut != api.defiAddresses[common.WethToken] {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// This will change based on the state interference check
+func (api *RelayAPI) IsTraceToWEthDaiPair(callTrace common.CallTrace) (bool, error) {
+	isValid, err := api.BaseTraceChecks(callTrace)
+	if err != nil {
+		return false, err
+	}
+	if !isValid {
+		return false, nil
+	}
 
 	uniswapDaiWethAddress1 := api.defiAddresses[common.DaiWethPair1]
 	uniswapDaiWethAddress2 := api.defiAddresses[common.DaiWethPair2]
 	if *callTrace.To != uniswapDaiWethAddress1 && *callTrace.To != uniswapDaiWethAddress2 {
-		return false, nil
-	}
-
-	if len(callTrace.Input) < 4 {
 		return false, nil
 	}
 

@@ -47,11 +47,13 @@ var (
 	// this is for storing DeFi addresses for state interference checks
 	DaiToken  = "dai"
 	WethToken = "weth"
+	UsdcToken = "usdc"
 	// 2 addresses are specifically in custom devnet, we have 2 pairs of Dai/Weth for arbitrage tests
 	DaiWethPair1    = "dai_weth_pair_1"
 	DaiWethPair2    = "dai_weth_pair_2"
 	UniswapFactory1 = "uniswap_factory_1"
 	UniswapFactory2 = "uniswap_factory_2"
+	UniV3SwapRouter = "uniswap_v3_swap_router"
 )
 
 type EthNetworkDetails struct {
@@ -955,3 +957,5 @@ type CallTrace struct {
 type CallTraceResponse struct {
 	Result CallTrace `json:"result"`
 }
+
+type NetworkStateInterferenceChecker func(CallTrace) (bool, error)
