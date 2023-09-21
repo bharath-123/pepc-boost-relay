@@ -156,6 +156,8 @@ func GetTestPayloadAttributes(t *testing.T) (string, types.Address, []byte, stri
 	return parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, uint64(32)
 }
 
+// TODO - add IsTxUniV3EthUsdcSwap test
+
 func TestIsTxWEthDaiSwap(t *testing.T) {
 	_, _, backend := startTestBackend(t)
 
@@ -205,6 +207,8 @@ func TestIsTxWEthDaiSwap(t *testing.T) {
 		})
 	}
 }
+
+// TODO - Add IsTraceUniV3EthUsdcSwap test
 
 // this is only for custom network
 func TestIsTraceToWEthDaiPair(t *testing.T) {
