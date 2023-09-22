@@ -247,7 +247,109 @@ func TestStateInterference(t *testing.T) {
 	}
 }
 
-// TODO - Add IsTraceUniV3EthUsdcSwap test
+func TestBaseTraceChecks(t *testing.T) {
+	_, _, backend := startTestBackend(t, common.EthNetworkGoerli)
+
+	cases := []struct {
+		description    string
+		callTrace      common.CallTrace
+		isTraceCorrect bool
+	}{
+		{
+			description: "Call to smart contract",
+			callTrace: common.CallTrace{
+				To: nil,
+			},
+			isTraceCorrect: false,
+		},
+		{
+			description: "Call type is STATICCALL",
+			callTrace: common.CallTrace{
+				Type: "STATICCALL",
+			},
+			isTraceCorrect: false,
+		},
+		{
+			description: "Call input is less then 4 bytes",
+			callTrace: common.CallTrace{
+				Input: []byte{0x01, 0x02, 0x03},
+			},
+			isTraceCorrect: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.description, func(t *testing.T) {
+			res, err := backend.relay.BaseTraceChecks(c.callTrace)
+			require.NoError(t, err)
+			require.Equal(t, c.isTraceCorrect, res)
+
+		})
+	}
+}
+
+// this is only for custom network
+func TestIsTraceEthUsdcSwap(t *testing.T) {
+	_, _, backend := startTestBackend(t, common.EthNetworkGoerli)
+
+	// Payload attributes
+	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkGoerli)
+
+	ethUsdcTraceContents := common.LoadFileContents(t, "../../testdata/traces/goerli/eth_usdc_trace.json")
+	ethUsdcTrace := new(common.CallTrace)
+	err := json.Unmarshal(ethUsdcTraceContents, ethUsdcTrace)
+	require.NoError(t, err)
+
+	pairToDifferentAddress := new(common.CallTrace)
+	err = json.Unmarshal(ethUsdcTraceContents, pairToDifferentAddress)
+	// some random address
+	pairToDifferentAddress.To = &uniswapV2Addr
+
+	ethUsdcTraceDifferentMethod := new(common.CallTrace)
+	err = json.Unmarshal(ethUsdcTraceContents, ethUsdcTraceDifferentMethod)
+	ethUsdcTraceDifferentMethod.Input = append([]byte("0x1234"), ethUsdcTrace.Input[4:]...)
+
+	cases := []struct {
+		description    string
+		callTrace      common.CallTrace
+		isTraceCorrect bool
+		requiredError  string
+	}{
+		{
+			description:    "valid trace",
+			callTrace:      *ethUsdcTrace,
+			isTraceCorrect: true,
+			requiredError:  "",
+		},
+		{
+			description:    "trace to different uniswap pair",
+			callTrace:      *pairToDifferentAddress,
+			isTraceCorrect: false,
+			requiredError:  "",
+		},
+		{
+			description:    "trace to correct uniswap pair but with different method",
+			callTrace:      *ethUsdcTraceDifferentMethod,
+			isTraceCorrect: false,
+			requiredError:  "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.description, func(t *testing.T) {
+			res, err := backend.relay.IsTraceUniV3EthUsdcSwap(c.callTrace)
+			if c.requiredError != "" {
+				require.Contains(t, err.Error(), c.requiredError)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, c.isTraceCorrect, res)
+			}
+		})
+	}
+
+}
 
 // this is only for custom network
 func TestIsTraceToWEthDaiPair(t *testing.T) {
@@ -282,14 +384,6 @@ func TestIsTraceToWEthDaiPair(t *testing.T) {
 			description:    "valid trace",
 			callTrace:      *wethDaiTrace,
 			isTraceCorrect: true,
-			requiredError:  "",
-		},
-		{
-			description: "static call trace",
-			callTrace: common.CallTrace{
-				Type: "STATICCALL",
-			},
-			isTraceCorrect: false,
 			requiredError:  "",
 		},
 		{
@@ -493,19 +587,21 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 	}
 }
 
-func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
+func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 	_, _, backend := startTestBackend(t, common.EthNetworkCustom)
 
 	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
+	validEthUsdcTx, validEthUsdcTxTrace, invalidEthUsdcTx, invalidEthUsdcTxTrace := GetGoerliTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
 		txs           []*gethtypes.Transaction
 		callTraces    *common.CallTrace
+		network       string
 		requiredError string
 	}{
 		{
-			description: "Invalid ToB tx",
+			description: "Invalid custom devnet ToB tx",
 			txs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    invalidWethDaiTx.Nonce(),
@@ -525,10 +621,11 @@ func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
 				}),
 			},
 			callTraces:    invalidWethDaiTrace,
+			network:       common.EthNetworkCustom,
 			requiredError: "not a valid tob tx",
 		},
 		{
-			description: "Valid ToB txs",
+			description: "Valid custom devnet ToB txs",
 			txs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    validWethDaiTx.Nonce(),
@@ -548,13 +645,62 @@ func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
 				}),
 			},
 			callTraces:    validWethDaiTxTrace,
+			network:       common.EthNetworkCustom,
+			requiredError: "",
+		},
+		{
+			description: "Invalid goerli ToB tx",
+			txs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    invalidEthUsdcTx.Nonce(),
+					GasPrice: invalidEthUsdcTx.GasPrice(),
+					Gas:      invalidEthUsdcTx.Gas(),
+					To:       invalidEthUsdcTx.To(),
+					Value:    invalidEthUsdcTx.Value(),
+					Data:     invalidEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			callTraces:    invalidEthUsdcTxTrace,
+			network:       common.EthNetworkGoerli,
+			requiredError: "not a valid tob tx",
+		},
+		{
+			description: "Valid goerli ToB txs",
+			txs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			callTraces:    validEthUsdcTxTrace,
+			network:       common.EthNetworkGoerli,
 			requiredError: "",
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
-			_, _, backend := startTestBackend(t, common.EthNetworkCustom)
+			_, _, backend := startTestBackend(t, c.network)
 
 			backend.relay.tracer = &MockTracer{
 				tracerError: "",
@@ -563,7 +709,7 @@ func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
 
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
-			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
 			err := backend.relay.checkTxAndSenderValidity(c.txs, common.TestLog)
 			if c.requiredError != "" {
@@ -577,9 +723,10 @@ func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
 
 // tests when tob txs are sent in sequence
 func TestSubmitTobTxsInSequence(t *testing.T) {
-	backend := newTestBackend(t, 1, common.EthNetworkCustom)
+	backend := newTestBackend(t, 1, common.EthNetworkGoerli)
 
-	_, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
+	validWethDaiTx, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
+	validEthUsdcTx, validEthUsdcTxTrace, _, _ := GetGoerliTracingRelatedTestData(t)
 
 	cases := []struct {
 		description        string
@@ -594,12 +741,12 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			description: "second set of tob txs is higher",
 			firstTobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    1,
-					GasPrice: big.NewInt(1),
-					Gas:      1,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(1),
-					Data:     []byte("tx1"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
@@ -612,12 +759,12 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			},
 			secondTobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    3,
-					GasPrice: big.NewInt(3),
-					Gas:      3,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(3),
-					Data:     []byte("tx3"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
@@ -637,12 +784,12 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			description: "first set of txs is higher",
 			firstTobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    1,
-					GasPrice: big.NewInt(1),
-					Gas:      1,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(1),
-					Data:     []byte("tx1"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
@@ -655,12 +802,12 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			},
 			secondTobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    3,
-					GasPrice: big.NewInt(3),
-					Gas:      3,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(3),
-					Data:     []byte("tx3"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
@@ -676,11 +823,96 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			network:            common.EthNetworkCustom,
 			nextSentIsHigher:   false,
 		},
+		{
+			description: "goerli first set of txs is higher",
+			firstTobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(2),
+					Data:     []byte(""),
+				}),
+			},
+			secondTobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    4,
+					GasPrice: big.NewInt(5),
+					Gas:      12,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(1),
+					Data:     []byte(""),
+				}),
+			},
+			firstTobTxsTraces:  validEthUsdcTxTrace,
+			secondTobTxsTraces: validEthUsdcTxTrace,
+			network:            common.EthNetworkGoerli,
+			nextSentIsHigher:   false,
+		},
+		{
+			description: "goerli second set of tob txs is higher",
+			firstTobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(2),
+					Data:     []byte(""),
+				}),
+			},
+			secondTobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    4,
+					GasPrice: big.NewInt(5),
+					Gas:      12,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(10),
+					Data:     []byte(""),
+				}),
+			},
+			firstTobTxsTraces:  validEthUsdcTxTrace,
+			secondTobTxsTraces: validEthUsdcTxTrace,
+			network:            common.EthNetworkGoerli,
+			nextSentIsHigher:   true,
+		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
-
 			backend := newTestBackend(t, 1, c.network)
 
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
@@ -754,7 +986,8 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 func TestSubmitTobTxs(t *testing.T) {
 	backend := newTestBackend(t, 1, common.EthNetworkCustom)
 
-	_, validWethDaiTxTrace, _, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
+	validWethDaiTx, validWethDaiTxTrace, _, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
+	validEthUsdcTx, validEthUsdcTxTrace, invalidEthUsdcTx, invalidEthUsdcTxTrace := GetGoerliTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
@@ -785,12 +1018,12 @@ func TestSubmitTobTxs(t *testing.T) {
 			description: "payout to wrong address",
 			tobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    3,
-					GasPrice: big.NewInt(3),
-					Gas:      3,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(3),
-					Data:     []byte("tx6"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
@@ -807,15 +1040,15 @@ func TestSubmitTobTxs(t *testing.T) {
 			slotDelta:     1,
 		},
 		{
-			description: "ToB state interference",
+			description: "custom devnet ToB state interference",
 			tobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    3,
-					GasPrice: big.NewInt(3),
-					Gas:      3,
-					To:       &backend.relay.relayerPayoutAddress,
-					Value:    big.NewInt(3),
-					Data:     []byte("tx6"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
@@ -829,6 +1062,31 @@ func TestSubmitTobTxs(t *testing.T) {
 			traces:        invalidWethDaiTrace,
 			requiredError: "not a valid tob tx",
 			network:       common.EthNetworkCustom,
+			slotDelta:     1,
+		},
+		{
+			description: "goerli ToB state interference",
+			tobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    invalidEthUsdcTx.Nonce(),
+					GasPrice: invalidEthUsdcTx.GasPrice(),
+					Gas:      invalidEthUsdcTx.Gas(),
+					To:       invalidEthUsdcTx.To(),
+					Value:    invalidEthUsdcTx.Value(),
+					Data:     invalidEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    4,
+					GasPrice: big.NewInt(5),
+					Gas:      12,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(5),
+					Data:     []byte(""),
+				}),
+			},
+			traces:        invalidEthUsdcTxTrace,
+			requiredError: "not a valid tob tx",
+			network:       common.EthNetworkGoerli,
 			slotDelta:     1,
 		},
 		{
@@ -865,15 +1123,65 @@ func TestSubmitTobTxs(t *testing.T) {
 			traces:        nil,
 		},
 		{
-			description: "Valid TobTxs sent",
+			description: "custom devnet Valid TobTxs sent",
 			tobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    3,
-					GasPrice: big.NewInt(3),
-					Gas:      3,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(3),
-					Data:     []byte("tx3"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    4,
+					GasPrice: big.NewInt(5),
+					Gas:      12,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(10),
+					Data:     []byte(""),
+				}),
+			},
+			traces:        validWethDaiTxTrace,
+			network:       common.EthNetworkCustom,
+			requiredError: "",
+			slotDelta:     1,
+		},
+		{
+			description: "goerli Valid TobTxs sent",
+			tobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    4,
+					GasPrice: big.NewInt(5),
+					Gas:      12,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(10),
+					Data:     []byte(""),
+				}),
+			},
+			traces:        validEthUsdcTxTrace,
+			network:       common.EthNetworkGoerli,
+			requiredError: "",
+			slotDelta:     1,
+		},
+		{
+			description: "devnet Valid TobTxs sent",
+			tobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
@@ -995,7 +1303,8 @@ func assertBlock(t *testing.T, backend *testBackend, headSlot uint64, parentHash
 func TestSubmitBuilderBlockInSequence(t *testing.T) {
 	backend := newTestBackend(t, 1, common.EthNetworkCustom)
 
-	_, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
+	validWethDaiTx, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
+	validEthUsdcTx, validEthUsdcTxTrace, _, _ := GetGoerliTracingRelatedTestData(t)
 
 	cases := []struct {
 		description        string
@@ -1010,12 +1319,12 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			description: "second set of tob txs is higher",
 			firstTobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    1,
-					GasPrice: big.NewInt(1),
-					Gas:      1,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(1),
-					Data:     []byte("tx1"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
@@ -1028,12 +1337,12 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			},
 			secondTobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    3,
-					GasPrice: big.NewInt(3),
-					Gas:      3,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(3),
-					Data:     []byte("tx3"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
@@ -1053,12 +1362,12 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			description: "first set of txs is higher",
 			firstTobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    1,
-					GasPrice: big.NewInt(1),
-					Gas:      1,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(1),
-					Data:     []byte("tx1"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
@@ -1071,12 +1380,12 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			},
 			secondTobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    3,
-					GasPrice: big.NewInt(3),
-					Gas:      3,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(3),
-					Data:     []byte("tx3"),
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
 				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
@@ -1091,6 +1400,92 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			secondTobTxsTraces: validWethDaiTxTrace,
 			network:            common.EthNetworkCustom,
 			nextSentIsHigher:   false,
+		},
+		{
+			description: "goerli first set of txs is higher",
+			firstTobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(2),
+					Data:     []byte(""),
+				}),
+			},
+			secondTobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    4,
+					GasPrice: big.NewInt(5),
+					Gas:      12,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(1),
+					Data:     []byte(""),
+				}),
+			},
+			firstTobTxsTraces:  validEthUsdcTxTrace,
+			secondTobTxsTraces: validEthUsdcTxTrace,
+			network:            common.EthNetworkGoerli,
+			nextSentIsHigher:   false,
+		},
+		{
+			description: "goerli second set of tob txs is higher",
+			firstTobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(2),
+					Data:     []byte(""),
+				}),
+			},
+			secondTobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    4,
+					GasPrice: big.NewInt(5),
+					Gas:      12,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(10),
+					Data:     []byte(""),
+				}),
+			},
+			firstTobTxsTraces:  validEthUsdcTxTrace,
+			secondTobTxsTraces: validEthUsdcTxTrace,
+			network:            common.EthNetworkGoerli,
+			nextSentIsHigher:   true,
 		},
 	}
 
@@ -1215,6 +1610,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 	backend := newTestBackend(t, 1, common.EthNetworkCustom)
 
 	validWethDaiTx, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
+	validEthUsdcTx, validEthUsdcTxTrace, _, _ := GetGoerliTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
@@ -1231,7 +1627,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			requiredError: "",
 		},
 		{
-			description: "ToB txs of some value are present",
+			description: "custom devnet ToB txs of some value are present",
 			tobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    validWethDaiTx.Nonce(),
@@ -1254,6 +1650,30 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			traces:        validWethDaiTxTrace,
 			requiredError: "",
 		},
+		{
+			description: "goerli ToB txs of some value are present",
+			tobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validEthUsdcTx.Nonce(),
+					GasPrice: validEthUsdcTx.GasPrice(),
+					Gas:      validEthUsdcTx.Gas(),
+					To:       validEthUsdcTx.To(),
+					Value:    validEthUsdcTx.Value(),
+					Data:     validEthUsdcTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &backend.relay.relayerPayoutAddress,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			network:       common.EthNetworkGoerli,
+			traces:        validEthUsdcTxTrace,
+			requiredError: "",
+		},
 	}
 
 	for _, c := range cases {
@@ -1265,7 +1685,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			submissionSlot := headSlot + 1
 			submissionTimestamp := 1606824419
 
-			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
 			if c.traces != nil {
 				backend.relay.tracer = &MockTracer{
