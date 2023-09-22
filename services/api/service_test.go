@@ -53,7 +53,7 @@ type testBackend struct {
 	redis     *datastore.RedisCache
 }
 
-func newTestBackend(t require.TestingT, numBeaconNodes int) *testBackend {
+func newTestBackend(t *testing.T, numBeaconNodes int, network string) *testBackend {
 	redisClient, err := miniredis.Run()
 	require.NoError(t, err)
 
@@ -73,7 +73,15 @@ func newTestBackend(t require.TestingT, numBeaconNodes int) *testBackend {
 	sk, _, err := bls.GenerateNewKeypair()
 	require.NoError(t, err)
 
-	mainnetDetails, err := common.NewEthNetworkDetails(common.EthNetworkMainnet)
+	if network == common.EthNetworkCustom {
+		t.Setenv("GENESIS_FORK_VERSION", types.GenesisForkVersionMainnet)
+		t.Setenv("GENESIS_VALIDATORS_ROOT", types.GenesisValidatorsRootMainnet)
+		t.Setenv("BELLATRIX_FORK_VERSION", types.BellatrixForkVersionMainnet)
+		t.Setenv("CAPELLA_FORK_VERSION", common.CapellaForkVersionMainnet)
+		t.Setenv("DENEB_FORK_VERSION", common.DenebForkVersionMainnet)
+	}
+
+	mainnetDetails, err := common.NewEthNetworkDetails(network)
 	require.NoError(t, err)
 
 	opts := RelayAPIOpts{
@@ -201,7 +209,7 @@ func (be *testBackend) requestWithUA(method, path, userAgent string, payload any
 
 func TestWebserver(t *testing.T) {
 	t.Run("errors when webserver is already existing", func(t *testing.T) {
-		backend := newTestBackend(t, 1)
+		backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 		backend.relay.srvStarted.Store(true)
 		err := backend.relay.StartServer()
 		require.Error(t, err)
@@ -209,20 +217,20 @@ func TestWebserver(t *testing.T) {
 }
 
 func TestWebserverRootHandler(t *testing.T) {
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 	rr := backend.request(http.MethodGet, "/", nil)
 	require.Equal(t, http.StatusOK, rr.Code)
 }
 
 func TestStatus(t *testing.T) {
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 	path := "/eth/v1/builder/status"
 	rr := backend.request(http.MethodGet, path, common.ValidPayloadRegisterValidator)
 	require.Equal(t, http.StatusOK, rr.Code)
 }
 
 func TestLivez(t *testing.T) {
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 	path := "/livez"
 	rr := backend.request(http.MethodGet, path, nil)
 	require.Equal(t, http.StatusOK, rr.Code)
@@ -257,7 +265,7 @@ func TestRegisterValidator(t *testing.T) {
 	// })
 
 	t.Run("not a known validator", func(t *testing.T) {
-		backend := newTestBackend(t, 1)
+		backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 
 		rr := backend.request(http.MethodPost, path, []types.SignedValidatorRegistration{common.ValidPayloadRegisterValidator})
 		require.Equal(t, http.StatusBadRequest, rr.Code)
@@ -295,7 +303,7 @@ func TestRegisterValidator(t *testing.T) {
 
 func TestGetHeader(t *testing.T) {
 	// Setup backend with headSlot and genesisTime
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 	backend.relay.genesisInfo = &beaconclient.GetGenesisResponse{
 		Data: beaconclient.GetGenesisResponseData{
 			GenesisTime: uint64(time.Now().UTC().Unix()),
@@ -344,7 +352,7 @@ func TestGetHeader(t *testing.T) {
 func TestBuilderApiGetValidators(t *testing.T) {
 	path := "/relay/v1/builder/validators"
 
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 	duties := []common.BuilderGetValidatorsResponseEntry{
 		{
 			Slot:  1,
@@ -370,7 +378,7 @@ func TestDataApiGetDataProposerPayloadDelivered(t *testing.T) {
 	path := "/relay/v1/data/bidtraces/proposer_payload_delivered"
 
 	t.Run("Accept valid block_hash", func(t *testing.T) {
-		backend := newTestBackend(t, 1)
+		backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 
 		validBlockHash := "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		rr := backend.request(http.MethodGet, path+"?block_hash="+validBlockHash, nil)
@@ -378,7 +386,7 @@ func TestDataApiGetDataProposerPayloadDelivered(t *testing.T) {
 	})
 
 	t.Run("Reject invalid block_hash", func(t *testing.T) {
-		backend := newTestBackend(t, 1)
+		backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 
 		invalidBlockHashes := []string{
 			// One character too long.
@@ -418,7 +426,7 @@ func TestBuilderSubmitBlockSSZ(t *testing.T) {
 
 func TestBuilderSubmitBlock(t *testing.T) {
 	path := "/relay/v1/builder/blocks"
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkMainnet)
 
 	headSlot := uint64(32)
 	submissionSlot := headSlot + 1
@@ -576,7 +584,7 @@ func TestCheckSubmissionFeeRecipient(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.description, func(t *testing.T) {
-			_, _, backend := startTestBackend(t)
+			_, _, backend := startTestBackend(t, common.EthNetworkMainnet)
 			backend.relay.proposerDutiesLock.RLock()
 			backend.relay.proposerDutiesMap[tc.payload.Slot()] = tc.slotDuty
 			backend.relay.proposerDutiesLock.RUnlock()
@@ -721,7 +729,7 @@ func TestCheckSubmissionPayloadAttrs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.description, func(t *testing.T) {
-			_, _, backend := startTestBackend(t)
+			_, _, backend := startTestBackend(t, common.EthNetworkMainnet)
 			backend.relay.payloadAttributesLock.RLock()
 			backend.relay.payloadAttributes[testParentHash] = tc.attrs
 			backend.relay.payloadAttributesLock.RUnlock()
@@ -791,7 +799,7 @@ func TestCheckSubmissionSlotDetails(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.description, func(t *testing.T) {
-			_, _, backend := startTestBackend(t)
+			_, _, backend := startTestBackend(t, common.EthNetworkMainnet)
 
 			headSlot := testSlot - 1
 			w := httptest.NewRecorder()
@@ -854,7 +862,7 @@ func TestCheckBuilderEntry(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.description, func(t *testing.T) {
-			_, _, backend := startTestBackend(t)
+			_, _, backend := startTestBackend(t, common.EthNetworkMainnet)
 			backend.relay.blockBuildersCache[tc.pk.String()] = tc.entry
 			backend.relay.ffDisableLowPrioBuilders = true
 			w := httptest.NewRecorder()
