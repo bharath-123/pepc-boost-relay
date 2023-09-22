@@ -267,7 +267,7 @@ func FillUpDefiAddresses(opts RelayAPIOpts) map[string]common2.Address {
 	} else if opts.EthNetDetails.Name == common.EthNetworkGoerli {
 		defiAddresses[common.WethToken] = common2.HexToAddress("0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6")
 		defiAddresses[common.UsdcToken] = common2.HexToAddress("0x9B2660A7BEcd0Bf3d90401D1C214d2CD36317da5")
-		defiAddresses[common.UniV3SwapRouter] = common2.HexToAddress("0x1F98431c8aD98523631AE4a59f267346ea31F984")
+		defiAddresses[common.UniV3SwapRouter] = common2.HexToAddress("0xE592427A0AEce92De3Edee1F18E0157C05861564")
 	} else if opts.EthNetDetails.Name == common.EthNetworkCustom {
 
 		defiAddresses[common.DaiToken] = common2.HexToAddress("0xAb2A01BC351770D09611Ac80f1DE076D56E0487d")
