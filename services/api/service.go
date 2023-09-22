@@ -693,14 +693,17 @@ func (api *RelayAPI) IsTraceUniV3EthUsdcSwap(callTrace common.CallTrace) (bool, 
 	if err != nil {
 		return false, err
 	}
-	swapRouterParams, ok := args.(contracts.ISwapRouterExactInputSingleParams)
-	if !ok {
-		return false, fmt.Errorf("failed to parse args of swapRouter tx to ISwapRouterExactInputSingleParams")
+	// TODO - this is inefficient, i was not able to cast the interface to the struct for some reason. re-visit this later
+	argBytes, err := json.Marshal(args)
+	swapRouterParams := new(contracts.ISwapRouterExactInputSingleParams)
+	err = json.Unmarshal(argBytes, swapRouterParams)
+	if err != nil {
+		return false, err
 	}
-	if swapRouterParams.TokenIn != api.defiAddresses[common.WethToken] || swapRouterParams.TokenOut != api.defiAddresses[common.UsdcToken] {
+	if swapRouterParams.TokenIn != api.defiAddresses[common.WethToken] && swapRouterParams.TokenIn != api.defiAddresses[common.UsdcToken] {
 		return false, nil
 	}
-	if swapRouterParams.TokenOut != api.defiAddresses[common.UsdcToken] || swapRouterParams.TokenOut != api.defiAddresses[common.WethToken] {
+	if swapRouterParams.TokenOut != api.defiAddresses[common.UsdcToken] && swapRouterParams.TokenOut != api.defiAddresses[common.WethToken] {
 		return false, nil
 	}
 
