@@ -141,6 +141,30 @@ func GetCustomDevnetTracingRelatedTestData(t *testing.T) (*gethtypes.Transaction
 	return validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace
 }
 
+func GetGoerliTracingRelatedTestData(t *testing.T) (*gethtypes.Transaction, *common.CallTrace, *gethtypes.Transaction, *common.CallTrace) {
+	validEthUsdcTxContents := common.LoadFileContents(t, "../../testdata/traces/goerli/valid_eth_usdc_tx.json")
+	validEthUsdcTx := new(gethtypes.Transaction)
+	err := validEthUsdcTx.UnmarshalJSON(validEthUsdcTxContents)
+	require.NoError(t, err)
+
+	invalidEthUsdcTxContents := common.LoadFileContents(t, "../../testdata/traces/goerli/invalid_eth_usdc_tx.json")
+	invalidEthUsdcTx := new(gethtypes.Transaction)
+	err = invalidEthUsdcTx.UnmarshalJSON(invalidEthUsdcTxContents)
+	require.NoError(t, err)
+
+	validEthUsdcTxTraceContents := common.LoadFileContents(t, "../../testdata/traces/goerli/valid_eth_usdc_tx_trace.json")
+	validEthUsdcTxTrace := new(common.CallTrace)
+	err = json.Unmarshal(validEthUsdcTxTraceContents, validEthUsdcTxTrace)
+	require.NoError(t, err)
+
+	invalidEthUsdcTxTraceContents := common.LoadFileContents(t, "../../testdata/traces/goerli/invalid_eth_usdc_tx_trace.json")
+	invalidEthUsdcTxTrace := new(common.CallTrace)
+	err = json.Unmarshal(invalidEthUsdcTxTraceContents, invalidEthUsdcTxTrace)
+	require.NoError(t, err)
+
+	return validEthUsdcTx, validEthUsdcTxTrace, invalidEthUsdcTx, invalidEthUsdcTxTrace
+}
+
 func GetTestPayloadAttributes(t *testing.T) (string, types.Address, []byte, string, phase0.BLSPubKey, uint64) {
 	t.Helper()
 	parentHash := "0xbd3291854dc822b7ec585925cda0e18f06af28fa2886e15f52d52dd4b6f94ed6"
@@ -158,10 +182,11 @@ func GetTestPayloadAttributes(t *testing.T) (string, types.Address, []byte, stri
 
 // TODO - add IsTxUniV3EthUsdcSwap test
 
-func TestIsTxWEthDaiSwap(t *testing.T) {
+func TestStateInterference(t *testing.T) {
 	_, _, backend := startTestBackend(t)
 
 	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
+	validEthUsdcTx, validEthUsdcTxTrace, invalidEthUsdcTx, invalidEthUsdcTxTrace := GetGoerliTracingRelatedTestData(t)
 
 	cases := []struct {
 		description   string
@@ -172,7 +197,7 @@ func TestIsTxWEthDaiSwap(t *testing.T) {
 		requiredError string
 	}{
 		{
-			description:   "valid tx",
+			description:   "valid custom devnet tx",
 			callTraces:    validWethDaiTxTrace,
 			tx:            validWethDaiTx,
 			isTxCorrect:   true,
@@ -180,9 +205,25 @@ func TestIsTxWEthDaiSwap(t *testing.T) {
 			requiredError: "",
 		},
 		{
-			description:   "invalid tx",
+			description:   "invalid custom devnet tx",
 			callTraces:    invalidWethDaiTrace,
 			tx:            invalidWethDaiTx,
+			isTxCorrect:   false,
+			network:       "custom",
+			requiredError: "",
+		},
+		{
+			description:   "valid goerli tx",
+			callTraces:    validEthUsdcTxTrace,
+			tx:            validEthUsdcTx,
+			isTxCorrect:   true,
+			network:       "goerli",
+			requiredError: "",
+		},
+		{
+			description:   "invalid goerli tx",
+			callTraces:    invalidEthUsdcTxTrace,
+			tx:            invalidEthUsdcTx,
 			isTxCorrect:   false,
 			network:       "custom",
 			requiredError: "",
