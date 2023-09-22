@@ -58,7 +58,7 @@ type blockRequestOpts struct {
 	domain     boostTypes.Domain
 }
 
-func startTestBackend(t *testing.T) (*phase0.BLSPubKey, *bls.SecretKey, *testBackend) {
+func startTestBackend(t *testing.T, network string) (*phase0.BLSPubKey, *bls.SecretKey, *testBackend) {
 	t.Helper()
 	// Setup test key pair.
 	sk, _, err := bls.GenerateNewKeypair()
@@ -71,7 +71,7 @@ func startTestBackend(t *testing.T) (*phase0.BLSPubKey, *bls.SecretKey, *testBac
 	pkStr := pubkey.String()
 
 	// Setup test backend.
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, network)
 	backend.relay.genesisInfo = &beaconclient.GetGenesisResponse{}
 	backend.relay.genesisInfo.Data.GenesisTime = 0
 	backend.relay.proposerDutiesMap = map[uint64]*common.BuilderGetValidatorsResponseEntry{
@@ -175,7 +175,7 @@ func TestSimulateBlock(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.description, func(t *testing.T) {
-			pubkey, secretkey, backend := startTestBackend(t)
+			pubkey, secretkey, backend := startTestBackend(t, common.EthNetworkMainnet)
 			backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{
 				simulationError: tc.simulationError,
 			}
@@ -223,7 +223,7 @@ func TestProcessOptimisticBlock(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.description, func(t *testing.T) {
-			pubkey, secretkey, backend := startTestBackend(t)
+			pubkey, secretkey, backend := startTestBackend(t, common.EthNetworkMainnet)
 			pkStr := pubkey.String()
 			backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{
 				simulationError: tc.simulationError,
@@ -272,7 +272,7 @@ func TestDemoteBuilder(t *testing.T) {
 		IsOptimistic: false,
 		IsHighPrio:   true,
 	}
-	pubkey, secretkey, backend := startTestBackend(t)
+	pubkey, secretkey, backend := startTestBackend(t, common.EthNetworkMainnet)
 	pkStr := pubkey.String()
 	req := common.TestBuilderSubmitBlockRequest(secretkey, getTestBidTrace(*pubkey, collateral))
 	backend.relay.demoteBuilder(pkStr, &req, errFake)
@@ -290,7 +290,7 @@ func TestDemoteBuilder(t *testing.T) {
 }
 
 func TestPrepareBuildersForSlot(t *testing.T) {
-	pubkey, _, backend := startTestBackend(t)
+	pubkey, _, backend := startTestBackend(t, common.EthNetworkMainnet)
 	pkStr := pubkey.String()
 	// Clear cache.
 	backend.relay.blockBuildersCache = map[string]*blockBuilderCacheEntry{}
@@ -392,7 +392,7 @@ func TestPrepareBuildersForSlot(t *testing.T) {
 //}
 
 func TestInternalBuilderStatus(t *testing.T) {
-	pubkey, _, backend := startTestBackend(t)
+	pubkey, _, backend := startTestBackend(t, common.EthNetworkMainnet)
 	// Set all to false initially.
 	err := backend.relay.db.SetBlockBuilderStatus(pubkey.String(), common.BuilderStatus{})
 	require.NoError(t, err)
@@ -419,7 +419,7 @@ func TestInternalBuilderStatus(t *testing.T) {
 }
 
 func TestInternalBuilderCollateral(t *testing.T) {
-	pubkey, _, backend := startTestBackend(t)
+	pubkey, _, backend := startTestBackend(t, common.EthNetworkMainnet)
 	path := "/internal/v1/builder/collateral/" + pubkey.String()
 
 	// Set & Get.

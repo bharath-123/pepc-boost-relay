@@ -262,13 +262,13 @@ type RelayAPI struct {
 func FillUpDefiAddresses(opts RelayAPIOpts) map[string]common2.Address {
 	defiAddresses := make(map[string]common2.Address)
 
-	if opts.EthNetDetails.Name == "mainnet" {
+	if opts.EthNetDetails.Name == common.EthNetworkMainnet {
 		// TODO - fill up mainnet defi addresses
-	} else if opts.EthNetDetails.Name == "goerli" {
+	} else if opts.EthNetDetails.Name == common.EthNetworkGoerli {
 		defiAddresses[common.WethToken] = common2.HexToAddress("0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6")
-		defiAddresses[common.UsdcToken] = common2.HexToAddress("0x07865c6e87b9f70255377e024ace6630c1eaa37f")
+		defiAddresses[common.UsdcToken] = common2.HexToAddress("0x9B2660A7BEcd0Bf3d90401D1C214d2CD36317da5")
 		defiAddresses[common.UniV3SwapRouter] = common2.HexToAddress("0x1F98431c8aD98523631AE4a59f267346ea31F984")
-	} else if opts.EthNetDetails.Name == "custom" {
+	} else if opts.EthNetDetails.Name == common.EthNetworkCustom {
 
 		defiAddresses[common.DaiToken] = common2.HexToAddress("0xAb2A01BC351770D09611Ac80f1DE076D56E0487d")
 		defiAddresses[common.WethToken] = common2.HexToAddress("0x4c849Ff66a6F0A954cbf7818b8a763105C2787D6")
@@ -618,9 +618,9 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 
 // TODO - come up with better name? state interference is not really descriptive name
 func (api *RelayAPI) StateInterferenceChecks(trace *common.CallTrace) (bool, error) {
-	if api.opts.EthNetDetails.Name == "custom" {
+	if api.opts.EthNetDetails.Name == common.EthNetworkCustom {
 		return api.TraceChecker(trace, api.IsTraceToWEthDaiPair)
-	} else if api.opts.EthNetDetails.Name == "goerli" {
+	} else if api.opts.EthNetDetails.Name == common.EthNetworkGoerli {
 		return api.TraceChecker(trace, api.IsTraceUniV3EthUsdcSwap)
 	}
 
@@ -639,7 +639,6 @@ func (api *RelayAPI) TraceChecker(trace *common.CallTrace, f common.NetworkState
 		if err != nil {
 			return false, err
 		}
-		// we found a weth/dai swap i.e the tx contains a weth/dai swap
 		if res {
 			return true, nil
 		}
@@ -683,6 +682,7 @@ func (api *RelayAPI) IsTraceUniV3EthUsdcSwap(callTrace common.CallTrace) (bool, 
 	if err != nil {
 		return false, err
 	}
+	// TODO - we should support other uniswap smart contract calls. Support one for now.
 	exactInputSingleId := uniV3SwapRouterAbi.Methods["exactInputSingle"].ID
 	if !bytes.Equal(callTrace.Input[:4], exactInputSingleId) {
 		return false, nil

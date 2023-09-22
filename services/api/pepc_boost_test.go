@@ -180,10 +180,8 @@ func GetTestPayloadAttributes(t *testing.T) (string, types.Address, []byte, stri
 	return parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, uint64(32)
 }
 
-// TODO - add IsTxUniV3EthUsdcSwap test
-
 func TestStateInterference(t *testing.T) {
-	_, _, backend := startTestBackend(t)
+	_, _, backend := startTestBackend(t, common.EthNetworkCustom)
 
 	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
 	validEthUsdcTx, validEthUsdcTxTrace, invalidEthUsdcTx, invalidEthUsdcTxTrace := GetGoerliTracingRelatedTestData(t)
@@ -201,7 +199,7 @@ func TestStateInterference(t *testing.T) {
 			callTraces:    validWethDaiTxTrace,
 			tx:            validWethDaiTx,
 			isTxCorrect:   true,
-			network:       "custom",
+			network:       common.EthNetworkCustom,
 			requiredError: "",
 		},
 		{
@@ -209,7 +207,7 @@ func TestStateInterference(t *testing.T) {
 			callTraces:    invalidWethDaiTrace,
 			tx:            invalidWethDaiTx,
 			isTxCorrect:   false,
-			network:       "custom",
+			network:       common.EthNetworkCustom,
 			requiredError: "",
 		},
 		{
@@ -232,6 +230,8 @@ func TestStateInterference(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
+			_, _, backend := startTestBackend(t, c.network)
+
 			// Payload attributes
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
@@ -253,12 +253,12 @@ func TestStateInterference(t *testing.T) {
 
 // this is only for custom network
 func TestIsTraceToWEthDaiPair(t *testing.T) {
-	_, _, backend := startTestBackend(t)
+	_, _, backend := startTestBackend(t, common.EthNetworkCustom)
 
 	// Payload attributes
 	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
-	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
 
 	wethDaiTraceContents := common.LoadFileContents(t, "../../testdata/traces/custom/weth_dai_trace.json")
 	wethDaiTrace := new(common.CallTrace)
@@ -323,7 +323,7 @@ func TestIsTraceToWEthDaiPair(t *testing.T) {
 }
 
 func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
-	_, _, backend := startTestBackend(t)
+	_, _, backend := startTestBackend(t, common.EthNetworkCustom)
 	randomAddress := common2.BytesToAddress([]byte("0xabc"))
 
 	cases := []struct {
@@ -496,7 +496,7 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 }
 
 func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
-	_, _, backend := startTestBackend(t)
+	_, _, backend := startTestBackend(t, common.EthNetworkCustom)
 
 	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
 
@@ -556,6 +556,8 @@ func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
+			_, _, backend := startTestBackend(t, common.EthNetworkCustom)
+
 			backend.relay.tracer = &MockTracer{
 				tracerError: "",
 				callTrace:   c.callTraces,
@@ -563,7 +565,7 @@ func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
 
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
-			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
 
 			err := backend.relay.checkTxAndSenderValidity(c.txs, common.TestLog)
 			if c.requiredError != "" {
@@ -577,7 +579,7 @@ func TestCustomDevnetCheckTxAndSenderValidity(t *testing.T) {
 
 // tests when tob txs are sent in sequence
 func TestSubmitTobTxsInSequence(t *testing.T) {
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkCustom)
 
 	_, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
 
@@ -630,7 +632,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			},
 			firstTobTxsTraces:  validWethDaiTxTrace,
 			secondTobTxsTraces: validWethDaiTxTrace,
-			network:            "custom",
+			network:            common.EthNetworkCustom,
 			nextSentIsHigher:   true,
 		},
 		{
@@ -673,7 +675,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			},
 			firstTobTxsTraces:  validWethDaiTxTrace,
 			secondTobTxsTraces: validWethDaiTxTrace,
-			network:            "custom",
+			network:            common.EthNetworkCustom,
 			nextSentIsHigher:   false,
 		},
 	}
@@ -681,7 +683,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
 
-			backend := newTestBackend(t, 1)
+			backend := newTestBackend(t, 1, c.network)
 
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
@@ -752,7 +754,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 }
 
 func TestSubmitTobTxs(t *testing.T) {
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkCustom)
 
 	_, validWethDaiTxTrace, _, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
 
@@ -778,7 +780,7 @@ func TestSubmitTobTxs(t *testing.T) {
 			},
 			requiredError: "We require a payment tx along with the TOB txs!",
 			traces:        nil,
-			network:       "custom",
+			network:       common.EthNetworkCustom,
 			slotDelta:     1,
 		},
 		{
@@ -803,7 +805,7 @@ func TestSubmitTobTxs(t *testing.T) {
 			},
 			requiredError: "we require a payment tx to the relayer along with the TOB txs",
 			traces:        nil,
-			network:       "custom",
+			network:       common.EthNetworkCustom,
 			slotDelta:     1,
 		},
 		{
@@ -828,7 +830,7 @@ func TestSubmitTobTxs(t *testing.T) {
 			},
 			traces:        invalidWethDaiTrace,
 			requiredError: "not a valid tob tx",
-			network:       "custom",
+			network:       common.EthNetworkCustom,
 			slotDelta:     1,
 		},
 		{
@@ -853,14 +855,14 @@ func TestSubmitTobTxs(t *testing.T) {
 			},
 			traces:        nil,
 			requiredError: "Slot's TOB bid not yet started!!",
-			network:       "custom",
+			network:       common.EthNetworkCustom,
 			slotDelta:     2,
 		},
 		{
 			description:   "No txs sent",
 			tobTxs:        []*gethtypes.Transaction{},
 			requiredError: "Empty TOB tx request sent",
-			network:       "custom",
+			network:       common.EthNetworkCustom,
 			slotDelta:     1,
 			traces:        nil,
 		},
@@ -885,7 +887,7 @@ func TestSubmitTobTxs(t *testing.T) {
 				}),
 			},
 			traces:        validWethDaiTxTrace,
-			network:       "custom",
+			network:       common.EthNetworkCustom,
 			requiredError: "",
 			slotDelta:     1,
 		},
@@ -893,7 +895,7 @@ func TestSubmitTobTxs(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
-			backend := newTestBackend(t, 1)
+			backend := newTestBackend(t, 1, c.network)
 
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
@@ -993,7 +995,7 @@ func assertBlock(t *testing.T, backend *testBackend, headSlot uint64, parentHash
 }
 
 func TestSubmitBuilderBlockInSequence(t *testing.T) {
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkCustom)
 
 	_, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
 
@@ -1046,7 +1048,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			},
 			firstTobTxsTraces:  validWethDaiTxTrace,
 			secondTobTxsTraces: validWethDaiTxTrace,
-			network:            "custom",
+			network:            common.EthNetworkCustom,
 			nextSentIsHigher:   true,
 		},
 		{
@@ -1089,14 +1091,14 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			},
 			firstTobTxsTraces:  validWethDaiTxTrace,
 			secondTobTxsTraces: validWethDaiTxTrace,
-			network:            "custom",
+			network:            common.EthNetworkCustom,
 			nextSentIsHigher:   false,
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
-			backend := newTestBackend(t, 1)
+			backend := newTestBackend(t, 1, c.network)
 
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
@@ -1212,7 +1214,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 }
 
 func TestSubmitBuilderBlock(t *testing.T) {
-	backend := newTestBackend(t, 1)
+	backend := newTestBackend(t, 1, common.EthNetworkCustom)
 
 	validWethDaiTx, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
 
@@ -1220,12 +1222,14 @@ func TestSubmitBuilderBlock(t *testing.T) {
 		description   string
 		tobTxs        []*gethtypes.Transaction
 		traces        *common.CallTrace
+		network       string
 		requiredError string
 	}{
 		{
 			description:   "No ToB txs",
 			tobTxs:        []*gethtypes.Transaction{},
 			traces:        nil,
+			network:       common.EthNetworkCustom,
 			requiredError: "",
 		},
 		{
@@ -1248,6 +1252,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
+			network:       common.EthNetworkCustom,
 			traces:        validWethDaiTxTrace,
 			requiredError: "",
 		},
@@ -1255,14 +1260,14 @@ func TestSubmitBuilderBlock(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
-			backend = newTestBackend(t, 1)
+			backend = newTestBackend(t, 1, c.network)
 
 			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
 
 			submissionSlot := headSlot + 1
 			submissionTimestamp := 1606824419
 
-			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, "custom")
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
 
 			if c.traces != nil {
 				backend.relay.tracer = &MockTracer{
