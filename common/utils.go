@@ -256,5 +256,5 @@ func GetMethodArgs(data []byte, method string, contractAbi *abi.ABI) (interface{
 		return nil, err
 	}
 
-	return res, nil
+	return res[0], nil
 }

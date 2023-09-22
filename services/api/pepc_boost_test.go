@@ -181,8 +181,6 @@ func GetTestPayloadAttributes(t *testing.T) (string, types.Address, []byte, stri
 }
 
 func TestStateInterference(t *testing.T) {
-	_, _, backend := startTestBackend(t, common.EthNetworkCustom)
-
 	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
 	validEthUsdcTx, validEthUsdcTxTrace, invalidEthUsdcTx, invalidEthUsdcTxTrace := GetGoerliTracingRelatedTestData(t)
 
@@ -215,7 +213,7 @@ func TestStateInterference(t *testing.T) {
 			callTraces:    validEthUsdcTxTrace,
 			tx:            validEthUsdcTx,
 			isTxCorrect:   true,
-			network:       "goerli",
+			network:       common.EthNetworkGoerli,
 			requiredError: "",
 		},
 		{
@@ -223,7 +221,7 @@ func TestStateInterference(t *testing.T) {
 			callTraces:    invalidEthUsdcTxTrace,
 			tx:            invalidEthUsdcTx,
 			isTxCorrect:   false,
-			network:       "custom",
+			network:       common.EthNetworkGoerli,
 			requiredError: "",
 		},
 	}
