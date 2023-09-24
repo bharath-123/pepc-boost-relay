@@ -1862,8 +1862,16 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 }
 
 // This method first checks whether the payouts are valid, then checks whether the txs are valid w.r.t state interference
-func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *logrus.Entry) error {
-	// TODO - Payouts still need to be modelled
+func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uint64, log *logrus.Entry) error {
+	// TODO - Payouts need to be modelled more efficiently
+
+	api.proposerDutiesLock.RLock()
+	slotDuty, ok := api.proposerDutiesMap[slot]
+	api.proposerDutiesLock.RUnlock()
+	if !ok {
+		return fmt.Errorf("could not find slot duty")
+	}
+	validatorFeeRecipient := slotDuty.Entry.Message.FeeRecipient
 
 	if len(txs) == 0 {
 		return fmt.Errorf("Empty TOB tx request sent!")
@@ -1875,11 +1883,11 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *log
 	// Start: Payout checks
 	lastTx := txs[len(txs)-1]
 
-	if lastTx.To() != nil && *lastTx.To() != api.relayerPayoutAddress {
-		return fmt.Errorf("we require a payment tx to the relayer along with the TOB txs")
+	if lastTx.To() != nil && lastTx.To().String() != validatorFeeRecipient.String() {
+		return fmt.Errorf("we require a payment tx to the proposer fee recipient along with the TOB txs")
 	}
 	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
-		return fmt.Errorf("the relayer payment tx is non-zero")
+		return fmt.Errorf("the proposer payment tx is non-zero")
 	}
 	if len(lastTx.Data()) != 0 {
 		return fmt.Errorf("the relayer payment tx has malformed data")
@@ -1966,7 +1974,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	err = api.checkTxAndSenderValidity(txs, log)
+	err = api.checkTxAndSenderValidity(txs, slot, log)
 	if err != nil {
 		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
