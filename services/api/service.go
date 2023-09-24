@@ -86,8 +86,6 @@ var (
 	pathInternalBuilderStatus     = "/internal/v1/builder/{pubkey:0x[a-fA-F0-9]+}"
 	pathInternalBuilderCollateral = "/internal/v1/builder/collateral/{pubkey:0x[a-fA-F0-9]+}"
 
-	relayerPayoutAddress = common2.HexToAddress("0x4E9A3d9D1cd2A2b2371b8b3F489aE72259886f1A")
-
 	// number of goroutines to save active validator
 	numValidatorRegProcessors = cli.GetEnvInt("NUM_VALIDATOR_REG_PROCESSORS", 10)
 
@@ -205,8 +203,6 @@ type RelayAPI struct {
 	srv         *http.Server
 	srvStarted  uberatomic.Bool
 	srvShutdown uberatomic.Bool
-
-	relayerPayoutAddress common2.Address
 
 	beaconClient beaconclient.IMultiBeaconClient
 	datastore    *datastore.Datastore
@@ -330,16 +326,15 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 	}
 
 	api = &RelayAPI{
-		opts:                 opts,
-		log:                  opts.Log,
-		blsSk:                opts.SecretKey,
-		publicKey:            &publicKey,
-		relayerPayoutAddress: relayerPayoutAddress,
-		datastore:            opts.Datastore,
-		beaconClient:         opts.BeaconClient,
-		redis:                opts.Redis,
-		memcached:            opts.Memcached,
-		db:                   opts.DB,
+		opts:         opts,
+		log:          opts.Log,
+		blsSk:        opts.SecretKey,
+		publicKey:    &publicKey,
+		datastore:    opts.Datastore,
+		beaconClient: opts.BeaconClient,
+		redis:        opts.Redis,
+		memcached:    opts.Memcached,
+		db:           opts.DB,
 
 		payloadAttributes: make(map[string]payloadAttributesHelper),
 
