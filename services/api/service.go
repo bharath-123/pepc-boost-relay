@@ -67,10 +67,13 @@ var (
 
 var (
 	// Proposer API (builder-specs)
-	pathStatus            = "/eth/v1/builder/status"
-	pathRegisterValidator = "/eth/v1/builder/validators"
-	pathGetHeader         = "/eth/v1/builder/header/{slot:[0-9]+}/{parent_hash:0x[a-fA-F0-9]+}/{pubkey:0x[a-fA-F0-9]+}"
-	pathGetPayload        = "/eth/v1/builder/blinded_blocks"
+	pathStatus               = "/eth/v1/builder/status"
+	pathRegisterValidator    = "/eth/v1/builder/validators"
+	pathGetHeader            = "/eth/v1/builder/header/{slot:[0-9]+}/{parent_hash:0x[a-fA-F0-9]+}/{pubkey:0x[a-fA-F0-9]+}"
+	pathGetPayload           = "/eth/v1/builder/blinded_blocks"
+	pathGetSlot              = "/eth/v1/relay/get_head_slot"
+	pathGetParentHashForSlot = "/eth/v1/relay/get_parent_hash_for_slot/{slot:[0-9]+}"
+	pathGetProposerForSlot   = "/eth/v1/relay/get_proposer_for_slot/{slot:[0-9]+}"
 
 	// Block builder API
 	pathBuilderGetValidators = "/relay/v1/builder/validators"
@@ -239,8 +242,9 @@ type RelayAPI struct {
 	ffRegValContinueOnInvalidSig bool // whether to continue processing further validators if one fails
 	ffIgnorableValidationErrors  bool // whether to enable ignorable validation errors
 
-	payloadAttributes     map[string]payloadAttributesHelper // key:parentBlockHash
-	payloadAttributesLock sync.RWMutex
+	payloadAttributes       map[string]payloadAttributesHelper // key:parentBlockHash
+	payloadAttributesBySlot map[uint64]payloadAttributesHelper // key:slot
+	payloadAttributesLock   sync.RWMutex
 
 	// The slot we are currently optimistically simulating.
 	optimisticSlot uberatomic.Uint64
@@ -336,7 +340,8 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 		memcached:    opts.Memcached,
 		db:           opts.DB,
 
-		payloadAttributes: make(map[string]payloadAttributesHelper),
+		payloadAttributes:       make(map[string]payloadAttributesHelper),
+		payloadAttributesBySlot: make(map[uint64]payloadAttributesHelper),
 
 		proposerDutiesResponse: &[]byte{},
 		blockSimRateLimiter:    NewBlockSimulationRateLimiter(opts.BlockSimURL),
@@ -430,6 +435,10 @@ func (api *RelayAPI) getRouter() http.Handler {
 		r.HandleFunc(pathInternalBuilderStatus, api.handleInternalBuilderStatus).Methods(http.MethodGet, http.MethodPost, http.MethodPut)
 		r.HandleFunc(pathInternalBuilderCollateral, api.handleInternalBuilderCollateral).Methods(http.MethodPost, http.MethodPut)
 	}
+
+	r.HandleFunc(pathGetSlot, api.handleGetSlot).Methods(http.MethodGet)
+	r.HandleFunc(pathGetParentHashForSlot, api.handleGetParentHashForSlot).Methods(http.MethodGet)
+	r.HandleFunc(pathGetProposerForSlot, api.handleGetProposerForSlot).Methods(http.MethodGet)
 
 	mresp := common.MustB64Gunzip("H4sICAtOkWQAA2EudHh0AKWVPW+DMBCGd36Fe9fIi5Mt8uqqs4dIlZiCEqosKKhVO2Txj699GBtDcEl4JwTnh/t4dS7YWom2FcVaiETSDEmIC+pWLGRVgKrD3UY0iwnSj6THofQJDomiR13BnPgjvJDqNWX+OtzH7inWEGvr76GOCGtg3Kp7Ak+lus3zxLNtmXaMUncjcj1cwbOH3xBZtJCYG6/w+hdpB6ErpnqzFPZxO4FdXB3SAEgpscoDqWeULKmJA4qyfYFg0QV+p7hD8GGDd6C8+mElGDKab1CWeUQMVVvVDTJVj6nngHmNOmSoe6yH1BM3KZIKpuRaHKrOFd/3ksQwzdK+ejdM4VTzSDfjJsY1STeVTWb0T9JWZbJs8DvsNvwaddKdUy4gzVIzWWaWk3IF8D35kyUDf3FfKipwk/DYUee2nYyWQD0xEKDHeprzeXYwVmZD/lXt1OOg8EYhFfitsmQVcwmbUutpdt3PoqWdMyd2DYHKbgcmPlEYMxPjR6HhxOfuNG52xZr7TtzpygJJKNtWS14Uf0T6XSmzBwAA")
 	r.HandleFunc("/miladyz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK); w.Write(mresp) }).Methods(http.MethodGet) //nolint:errcheck
@@ -917,6 +926,12 @@ func (api *RelayAPI) processPayloadAttributes(payloadAttributes beaconclient.Pay
 		withdrawalsRoot:   withdrawalsRoot,
 		payloadAttributes: payloadAttributes.Data.PayloadAttributes,
 	}
+	api.payloadAttributesBySlot[payloadAttrSlot] = payloadAttributesHelper{
+		slot:              payloadAttrSlot,
+		parentHash:        payloadAttributes.Data.ParentBlockHash,
+		withdrawalsRoot:   withdrawalsRoot,
+		payloadAttributes: payloadAttributes.Data.PayloadAttributes,
+	}
 
 	log.WithFields(logrus.Fields{
 		"randao":    payloadAttributes.Data.PayloadAttributes.PrevRandao,
@@ -1079,6 +1094,64 @@ func (api *RelayAPI) handleStatus(w http.ResponseWriter, req *http.Request) {
 // ---------------
 //  PROPOSER APIS
 // ---------------
+
+func (api *RelayAPI) handleGetSlot(w http.ResponseWriter, req *http.Request) {
+	api.RespondOK(w, api.headSlot.Load())
+}
+
+func (api *RelayAPI) handleGetParentHashForSlot(w http.ResponseWriter, req *http.Request) {
+	// slot is passed as url args
+	userAgent := req.UserAgent()
+	slotStr := mux.Vars(req)["slot"]
+	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	log := api.log.WithFields(logrus.Fields{
+		"method":        "registerValidator",
+		"ua":            userAgent,
+		"mevBoostV":     common.GetMevBoostVersionFromUserAgent(userAgent),
+		"headSlot":      api.headSlot.Load(),
+		"contentLength": req.ContentLength,
+	})
+	if err != nil {
+		log.Info("DEBUG: Invalid slot", "slot", slotStr, "err", err.Error())
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+	}
+
+	// get parent hash
+	res, ok := api.payloadAttributesBySlot[slot]
+	if !ok {
+		api.RespondError(w, http.StatusNotFound, "slot payload attributes not found")
+		return
+	}
+	api.RespondOK(w, res.parentHash)
+}
+
+func (api *RelayAPI) handleGetProposerForSlot(w http.ResponseWriter, req *http.Request) {
+	// slot is passed as url args
+	userAgent := req.UserAgent()
+	slotStr := mux.Vars(req)["slot"]
+	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	log := api.log.WithFields(logrus.Fields{
+		"method":        "registerValidator",
+		"ua":            userAgent,
+		"mevBoostV":     common.GetMevBoostVersionFromUserAgent(userAgent),
+		"headSlot":      api.headSlot.Load(),
+		"contentLength": req.ContentLength,
+	})
+	if err != nil {
+		log.Info("DEBUG: Invalid slot", "slot", slotStr, "err", err.Error())
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+	}
+
+	api.proposerDutiesLock.RLock()
+	res, ok := api.proposerDutiesMap[slot]
+	api.proposerDutiesLock.RUnlock()
+
+	if !ok {
+		api.RespondError(w, http.StatusNotFound, "slot proposer duties not found")
+		return
+	}
+	api.RespondOK(w, res.Entry.Message.Pubkey.String())
+}
 
 func (api *RelayAPI) handleRoot(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
