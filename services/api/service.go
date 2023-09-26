@@ -79,6 +79,7 @@ var (
 	pathBuilderGetValidators = "/relay/v1/builder/validators"
 	pathSubmitNewBlock       = "/relay/v1/builder/blocks"
 	pathSubmitNewTobTxs      = "/relay/v1/builder/tob_txs"
+	pathSubmitGetTobTxs      = "/relay/v1/builder/get_tob_txs/{slot:[0-9]+}/{parent_hash:0x[a-fA-F0-9]+}"
 
 	// Data API
 	pathDataProposerPayloadDelivered = "/relay/v1/data/bidtraces/proposer_payload_delivered"
@@ -413,6 +414,8 @@ func (api *RelayAPI) getRouter() http.Handler {
 		r.HandleFunc(pathBuilderGetValidators, api.handleBuilderGetValidators).Methods(http.MethodGet)
 		r.HandleFunc(pathSubmitNewBlock, api.handleSubmitNewBlock).Methods(http.MethodPost)
 		r.HandleFunc(pathSubmitNewTobTxs, api.handleSubmitNewTobTxs).Methods(http.MethodPost)
+		r.HandleFunc(pathSubmitGetTobTxs, api.handleSubmitGetTobTxs).Methods(http.MethodGet)
+
 	}
 
 	// Data API
@@ -1125,6 +1128,31 @@ func (api *RelayAPI) handleGetParentHashForSlot(w http.ResponseWriter, req *http
 	api.RespondOK(w, res.parentHash)
 }
 
+func (api *RelayAPI) handleSubmitGetTobTxs(w http.ResponseWriter, req *http.Request) {
+	userAgent := req.UserAgent()
+	parentHashHex := mux.Vars(req)["parent_hash"]
+	slotStr := mux.Vars(req)["slot"]
+	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	log := api.log.WithFields(logrus.Fields{
+		"method":        "GetTobTxs",
+		"ua":            userAgent,
+		"mevBoostV":     common.GetMevBoostVersionFromUserAgent(userAgent),
+		"headSlot":      api.headSlot.Load(),
+		"contentLength": req.ContentLength,
+	})
+
+	txPipeline := api.redis.NewTxPipeline()
+
+	tobTxs, err := api.redis.GetTobTx(context.Background(), txPipeline, slot, parentHashHex)
+	if err != nil {
+		log.WithError(err).Error("error getting tob txs")
+		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	api.RespondOK(w, tobTxs)
+}
+
 func (api *RelayAPI) handleGetProposerForSlot(w http.ResponseWriter, req *http.Request) {
 	// slot is passed as url args
 	userAgent := req.UserAgent()
@@ -1150,7 +1178,7 @@ func (api *RelayAPI) handleGetProposerForSlot(w http.ResponseWriter, req *http.R
 		api.RespondError(w, http.StatusNotFound, "slot proposer duties not found")
 		return
 	}
-	api.RespondOK(w, res.Entry.Message.Pubkey.String())
+	api.RespondOK(w, res.Entry.Message.FeeRecipient.String())
 }
 
 func (api *RelayAPI) handleRoot(w http.ResponseWriter, req *http.Request) {
