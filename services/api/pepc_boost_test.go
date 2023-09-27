@@ -52,7 +52,8 @@ func prepareBackend(t *testing.T, backend *testBackend, slot uint64, parentHash 
 		slot:       submissionSlot,
 		parentHash: parentHash,
 		payloadAttributes: beaconclient.PayloadAttributes{
-			PrevRandao: prevRandao,
+			PrevRandao:            prevRandao,
+			SuggestedFeeRecipient: feeRec.String(),
 		},
 		withdrawalsRoot: phase0.Root(withdrawalsRoot),
 	}
