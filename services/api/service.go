@@ -1170,15 +1170,15 @@ func (api *RelayAPI) handleGetProposerForSlot(w http.ResponseWriter, req *http.R
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 	}
 
-	api.payloadAttributesLock.RLock()
-	res, ok := api.payloadAttributesBySlot[slot]
-	api.payloadAttributesLock.RUnlock()
+	api.proposerDutiesLock.RLock()
+	res, ok := api.proposerDutiesMap[slot]
+	api.proposerDutiesLock.RUnlock()
 
 	if !ok {
 		api.RespondError(w, http.StatusNotFound, "slot proposer duties not found")
 		return
 	}
-	api.RespondOK(w, res.payloadAttributes.SuggestedFeeRecipient)
+	api.RespondOK(w, res.Entry.Message.FeeRecipient.String())
 }
 
 func (api *RelayAPI) handleRoot(w http.ResponseWriter, req *http.Request) {
