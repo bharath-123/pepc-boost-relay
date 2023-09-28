@@ -262,20 +262,23 @@ type RelayAPI struct {
 func FillUpDefiAddresses(opts RelayAPIOpts) map[string]common2.Address {
 	defiAddresses := make(map[string]common2.Address)
 
-	if opts.EthNetDetails.Name == "mainnet" {
+	if opts.EthNetDetails.Name == common.EthNetworkMainnet {
 		// TODO - fill up mainnet defi addresses
-	} else if opts.EthNetDetails.Name == "goerli" {
-		// TODO - fill up goerli addresses
+	} else if opts.EthNetDetails.Name == common.EthNetworkGoerli {
+		defiAddresses[common.WethToken] = common2.HexToAddress("0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6")
+		defiAddresses[common.UsdcToken] = common2.HexToAddress("0x9B2660A7BEcd0Bf3d90401D1C214d2CD36317da5")
+		defiAddresses[common.UniV3SwapRouter] = common2.HexToAddress("0xE592427A0AEce92De3Edee1F18E0157C05861564")
+	} else if opts.EthNetDetails.Name == common.EthNetworkCustom {
+
+		defiAddresses[common.DaiToken] = common2.HexToAddress("0xAb2A01BC351770D09611Ac80f1DE076D56E0487d")
+		defiAddresses[common.WethToken] = common2.HexToAddress("0x4c849Ff66a6F0A954cbf7818b8a763105C2787D6")
+
+		// this is only in custom kurtosis devnets
+		defiAddresses[common.DaiWethPair1] = common2.HexToAddress("0x0D6b80a9Cefc2C58308F0Adc26586E550E4422ef")
+		defiAddresses[common.UniswapFactory1] = common2.HexToAddress("0xBFF5cD0aA560e1d1C6B1E2C347860aDAe1bd8235")
+		defiAddresses[common.DaiWethPair2] = common2.HexToAddress("0x2ed2B47342450C006F83913a422F7C2BDAB8377a")
+		defiAddresses[common.UniswapFactory2] = common2.HexToAddress("0x6bEaE43B589D986d127Bd2BdAcF4e24C41C5C035")
 	}
-
-	defiAddresses[common.DaiToken] = common2.HexToAddress("0xAb2A01BC351770D09611Ac80f1DE076D56E0487d")
-	defiAddresses[common.WethToken] = common2.HexToAddress("0x4c849Ff66a6F0A954cbf7818b8a763105C2787D6")
-
-	// this is only in custom kurtosis devnets
-	defiAddresses[common.DaiWethPair1] = common2.HexToAddress("0x0D6b80a9Cefc2C58308F0Adc26586E550E4422ef")
-	defiAddresses[common.UniswapFactory1] = common2.HexToAddress("0xBFF5cD0aA560e1d1C6B1E2C347860aDAe1bd8235")
-	defiAddresses[common.DaiWethPair2] = common2.HexToAddress("0x2ed2B47342450C006F83913a422F7C2BDAB8377a")
-	defiAddresses[common.UniswapFactory2] = common2.HexToAddress("0x6bEaE43B589D986d127Bd2BdAcF4e24C41C5C035")
 
 	return defiAddresses
 }
@@ -615,26 +618,27 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 
 // TODO - come up with better name? state interference is not really descriptive name
 func (api *RelayAPI) StateInterferenceChecks(trace *common.CallTrace) (bool, error) {
-	if api.opts.EthNetDetails.Name == "custom" {
-		return api.IsTxWEthDaiSwap(trace)
+	if api.opts.EthNetDetails.Name == common.EthNetworkCustom {
+		return api.TraceChecker(trace, api.IsTraceToWEthDaiPair)
+	} else if api.opts.EthNetDetails.Name == common.EthNetworkGoerli {
+		return api.TraceChecker(trace, api.IsTraceUniV3EthUsdcSwap)
 	}
 
 	return false, fmt.Errorf("state interference checks not implemented for %s", api.opts.EthNetDetails.Name)
 }
 
 // just check if it goes to the DaiWethPair with a swap tx
-func (api *RelayAPI) IsTxWEthDaiSwap(trace *common.CallTrace) (bool, error) {
+func (api *RelayAPI) TraceChecker(trace *common.CallTrace, f common.NetworkStateInterferenceChecker) (bool, error) {
 	stack := []common.CallTrace{*trace}
 
 	for len(stack) > 0 {
 		current := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
-		res, err := api.IsTraceToWEthDaiPair(current)
+		res, err := f(current)
 		if err != nil {
 			return false, err
 		}
-		// we found a weth/dai swap i.e the tx contains a weth/dai swap
 		if res {
 			return true, nil
 		}
@@ -647,22 +651,78 @@ func (api *RelayAPI) IsTxWEthDaiSwap(trace *common.CallTrace) (bool, error) {
 	return false, nil
 }
 
-// This will change based on the state interference check
-func (api *RelayAPI) IsTraceToWEthDaiPair(callTrace common.CallTrace) (bool, error) {
+func (api *RelayAPI) BaseTraceChecks(callTrace common.CallTrace) (bool, error) {
 	if callTrace.To == nil {
 		return false, nil
 	}
 	if callTrace.Type == "STATICCALL" {
 		return false, nil
 	}
+	if len(callTrace.Input) < 4 {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func (api *RelayAPI) IsTraceUniV3EthUsdcSwap(callTrace common.CallTrace) (bool, error) {
+	isValid, err := api.BaseTraceChecks(callTrace)
+	if err != nil {
+		return false, err
+	}
+	if !isValid {
+		return false, nil
+	}
+
+	if *callTrace.To != api.defiAddresses[common.UniV3SwapRouter] {
+		return false, nil
+	}
+
+	uniV3SwapRouterAbi, err := contracts.UniswapV3SwapRouterMetaData.GetAbi()
+	if err != nil {
+		return false, err
+	}
+	// TODO - we should support other uniswap smart contract calls. Support one for now.
+	exactInputSingleId := uniV3SwapRouterAbi.Methods["exactInputSingle"].ID
+	if !bytes.Equal(callTrace.Input[:4], exactInputSingleId) {
+		return false, nil
+	}
+
+	// unpack the args
+	args, err := common.GetMethodArgs(callTrace.Input, "exactInputSingle", uniV3SwapRouterAbi)
+	if err != nil {
+		return false, err
+	}
+	// TODO - this is inefficient, i was not able to cast the interface to the struct for some reason. re-visit this later
+	argBytes, err := json.Marshal(args)
+	swapRouterParams := new(contracts.ISwapRouterExactInputSingleParams)
+	err = json.Unmarshal(argBytes, swapRouterParams)
+	if err != nil {
+		return false, err
+	}
+	if swapRouterParams.TokenIn != api.defiAddresses[common.WethToken] && swapRouterParams.TokenIn != api.defiAddresses[common.UsdcToken] {
+		return false, nil
+	}
+	if swapRouterParams.TokenOut != api.defiAddresses[common.UsdcToken] && swapRouterParams.TokenOut != api.defiAddresses[common.WethToken] {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// This will change based on the state interference check
+func (api *RelayAPI) IsTraceToWEthDaiPair(callTrace common.CallTrace) (bool, error) {
+	isValid, err := api.BaseTraceChecks(callTrace)
+	if err != nil {
+		return false, err
+	}
+	if !isValid {
+		return false, nil
+	}
 
 	uniswapDaiWethAddress1 := api.defiAddresses[common.DaiWethPair1]
 	uniswapDaiWethAddress2 := api.defiAddresses[common.DaiWethPair2]
 	if *callTrace.To != uniswapDaiWethAddress1 && *callTrace.To != uniswapDaiWethAddress2 {
-		return false, nil
-	}
-
-	if len(callTrace.Input) < 4 {
 		return false, nil
 	}
 
