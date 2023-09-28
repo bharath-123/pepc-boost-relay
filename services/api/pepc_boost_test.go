@@ -70,7 +70,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			requiredError: "We require a payment tx to the relayer along with the TOB txs!",
+			requiredError: "we require a payment tx to the relayer along with the TOB txs",
 		},
 		{
 			description: "zero value payout",
@@ -92,7 +92,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			requiredError: "The relayer payment tx is non-zero!",
+			requiredError: "the relayer payment tx is non-zero",
 		},
 		{
 			description: "malformed payout",
@@ -114,7 +114,7 @@ func TestCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte("tx2"),
 				}),
 			},
-			requiredError: "The relayer payment tx has malformed data!",
+			requiredError: "the relayer payment tx has malformed data",
 		},
 		{
 			description: "More than 2 txs sent",
