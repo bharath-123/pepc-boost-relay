@@ -10,10 +10,11 @@ import (
 )
 
 type MockDB struct {
-	ExecPayloads map[string]*ExecutionPayloadEntry
-	Builders     map[string]*BlockBuilderEntry
-	Demotions    map[string]bool
-	Refunds      map[string]bool
+	ExecPayloads     map[string]*ExecutionPayloadEntry
+	BlockSubmissions map[string]*BuilderBlockSubmissionEntry
+	Builders         map[string]*BlockBuilderEntry
+	Demotions        map[string]bool
+	Refunds          map[string]bool
 }
 
 func (db MockDB) NumRegisteredValidators() (count uint64, err error) {
@@ -37,7 +38,66 @@ func (db MockDB) GetLatestValidatorRegistrations(timestampOnly bool) ([]*Validat
 }
 
 func (db MockDB) SaveBuilderBlockSubmission(payload *common.BuilderSubmitBlockRequest, requestError, validationError error, receivedAt, eligibleAt time.Time, wasSimulated, saveExecPayload bool, profile common.Profile, optimisticSubmission bool) (entry *BuilderBlockSubmissionEntry, err error) {
-	return nil, nil
+	key := fmt.Sprintf("%d-%s-%s", payload.Slot(), payload.ProposerPubkey(), payload.BlockHash())
+
+	execPayloadEntry, err := PayloadToExecPayloadEntry(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	if saveExecPayload {
+		db.ExecPayloads[key] = execPayloadEntry
+	}
+
+	// Save block_submission
+	simErrStr := ""
+	if validationError != nil {
+		simErrStr = validationError.Error()
+	}
+
+	requestErrStr := ""
+	if requestError != nil {
+		requestErrStr = requestError.Error()
+	}
+
+	blockSubmissionEntry := &BuilderBlockSubmissionEntry{
+		ReceivedAt:         NewNullTime(receivedAt),
+		EligibleAt:         NewNullTime(eligibleAt),
+		ExecutionPayloadID: NewNullInt64(execPayloadEntry.ID),
+
+		WasSimulated: wasSimulated,
+		SimSuccess:   wasSimulated && validationError == nil,
+		SimError:     simErrStr,
+		SimReqError:  requestErrStr,
+
+		Signature: payload.Signature().String(),
+
+		Slot:       payload.Slot(),
+		BlockHash:  payload.BlockHash(),
+		ParentHash: payload.ParentHash(),
+
+		BuilderPubkey:        payload.BuilderPubkey().String(),
+		ProposerPubkey:       payload.ProposerPubkey(),
+		ProposerFeeRecipient: payload.ProposerFeeRecipient(),
+
+		GasUsed:  payload.GasUsed(),
+		GasLimit: payload.GasLimit(),
+
+		NumTx: uint64(payload.NumTx()),
+		Value: payload.Value().String(),
+
+		Epoch:       payload.Slot() / common.SlotsPerEpoch,
+		BlockNumber: payload.BlockNumber(),
+
+		DecodeDuration:       profile.Decode,
+		PrechecksDuration:    profile.Prechecks,
+		SimulationDuration:   profile.Simulation,
+		RedisUpdateDuration:  profile.RedisUpdate,
+		TotalDuration:        profile.Total,
+		OptimisticSubmission: optimisticSubmission,
+	}
+	db.BlockSubmissions[key] = blockSubmissionEntry
+	return blockSubmissionEntry, err
 }
 
 func (db MockDB) GetExecutionPayloadEntryByID(executionPayloadID int64) (entry *ExecutionPayloadEntry, err error) {
@@ -62,7 +122,13 @@ func (db MockDB) DeleteExecutionPayloads(idFirst, idLast uint64) error {
 }
 
 func (db MockDB) GetBlockSubmissionEntry(slot uint64, proposerPubkey, blockHash string) (entry *BuilderBlockSubmissionEntry, err error) {
-	return nil, nil
+	key := fmt.Sprintf("%d-%s-%s", slot, proposerPubkey, blockHash)
+	entry, ok := db.BlockSubmissions[key]
+	if !ok {
+		return nil, fmt.Errorf(sql.ErrNoRows.Error())
+	}
+
+	return entry, nil
 }
 
 func (db MockDB) GetRecentDeliveredPayloads(filters GetPayloadsFilters) ([]*DeliveredPayloadEntry, error) {
