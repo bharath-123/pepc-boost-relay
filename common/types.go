@@ -43,6 +43,15 @@ var (
 	ForkVersionStringBellatrix = "bellatrix"
 	ForkVersionStringCapella   = "capella"
 	ForkVersionStringDeneb     = "deneb"
+
+	// this is for storing DeFi addresses for state interference checks
+	DaiToken  = "dai"
+	WethToken = "weth"
+	// 2 addresses are specifically in custom devnet, we have 2 pairs of Dai/Weth for arbitrage tests
+	DaiWethPair1    = "dai_weth_pair_1"
+	DaiWethPair2    = "dai_weth_pair_2"
+	UniswapFactory1 = "uniswap_factory_1"
+	UniswapFactory2 = "uniswap_factory_2"
 )
 
 type EthNetworkDetails struct {
