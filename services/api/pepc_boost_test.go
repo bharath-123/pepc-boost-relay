@@ -1768,6 +1768,10 @@ func TestSubmitBuilderBlock(t *testing.T) {
 				payoutTxs := c.tobTxs[len(c.tobTxs)-1]
 				tobTxsValue = payoutTxs.Value()
 				assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot)
+			} else {
+				backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{
+					simulationError: nil,
+				}
 			}
 
 			// Prepare the request payload
