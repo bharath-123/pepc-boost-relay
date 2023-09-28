@@ -86,8 +86,6 @@ var (
 	pathInternalBuilderStatus     = "/internal/v1/builder/{pubkey:0x[a-fA-F0-9]+}"
 	pathInternalBuilderCollateral = "/internal/v1/builder/collateral/{pubkey:0x[a-fA-F0-9]+}"
 
-	relayerPayoutAddress = common2.HexToAddress("0x4E9A3d9D1cd2A2b2371b8b3F489aE72259886f1A")
-
 	// number of goroutines to save active validator
 	numValidatorRegProcessors = cli.GetEnvInt("NUM_VALIDATOR_REG_PROCESSORS", 10)
 
@@ -205,8 +203,6 @@ type RelayAPI struct {
 	srv         *http.Server
 	srvStarted  uberatomic.Bool
 	srvShutdown uberatomic.Bool
-
-	relayerPayoutAddress common2.Address
 
 	beaconClient beaconclient.IMultiBeaconClient
 	datastore    *datastore.Datastore
@@ -330,16 +326,15 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 	}
 
 	api = &RelayAPI{
-		opts:                 opts,
-		log:                  opts.Log,
-		blsSk:                opts.SecretKey,
-		publicKey:            &publicKey,
-		relayerPayoutAddress: relayerPayoutAddress,
-		datastore:            opts.Datastore,
-		beaconClient:         opts.BeaconClient,
-		redis:                opts.Redis,
-		memcached:            opts.Memcached,
-		db:                   opts.DB,
+		opts:         opts,
+		log:          opts.Log,
+		blsSk:        opts.SecretKey,
+		publicKey:    &publicKey,
+		datastore:    opts.Datastore,
+		beaconClient: opts.BeaconClient,
+		redis:        opts.Redis,
+		memcached:    opts.Memcached,
+		db:           opts.DB,
 
 		payloadAttributes: make(map[string]payloadAttributesHelper),
 
@@ -1862,8 +1857,16 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 }
 
 // This method first checks whether the payouts are valid, then checks whether the txs are valid w.r.t state interference
-func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *logrus.Entry) error {
-	// TODO - Payouts still need to be modelled
+func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uint64, log *logrus.Entry) error {
+	// TODO - Payouts need to be modelled more efficiently
+
+	api.proposerDutiesLock.RLock()
+	slotDuty, ok := api.proposerDutiesMap[slot]
+	api.proposerDutiesLock.RUnlock()
+	if !ok {
+		return fmt.Errorf("could not find slot duty")
+	}
+	validatorFeeRecipient := slotDuty.Entry.Message.FeeRecipient
 
 	if len(txs) == 0 {
 		return fmt.Errorf("Empty TOB tx request sent!")
@@ -1875,11 +1878,11 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, log *log
 	// Start: Payout checks
 	lastTx := txs[len(txs)-1]
 
-	if lastTx.To() != nil && *lastTx.To() != api.relayerPayoutAddress {
-		return fmt.Errorf("we require a payment tx to the relayer along with the TOB txs")
+	if lastTx.To() != nil && lastTx.To().String() != validatorFeeRecipient.String() {
+		return fmt.Errorf("we require a payment tx to the proposer fee recipient along with the TOB txs")
 	}
 	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
-		return fmt.Errorf("the relayer payment tx is non-zero")
+		return fmt.Errorf("the proposer payment tx is non-zero")
 	}
 	if len(lastTx.Data()) != 0 {
 		return fmt.Errorf("the relayer payment tx has malformed data")
@@ -1966,7 +1969,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	err = api.checkTxAndSenderValidity(txs, log)
+	err = api.checkTxAndSenderValidity(txs, slot, log)
 	if err != nil {
 		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
