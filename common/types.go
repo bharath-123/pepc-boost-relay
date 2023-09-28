@@ -16,6 +16,10 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	consensuscapella "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	utilbellatrix "github.com/attestantio/go-eth2-client/util/bellatrix"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
 	boostTypes "github.com/flashbots/go-boost-utils/types"
 )
 
@@ -39,6 +43,17 @@ var (
 	ForkVersionStringBellatrix = "bellatrix"
 	ForkVersionStringCapella   = "capella"
 	ForkVersionStringDeneb     = "deneb"
+
+	// this is for storing DeFi addresses for state interference checks
+	DaiToken  = "dai"
+	WethToken = "weth"
+	UsdcToken = "usdc"
+	// 2 addresses are specifically in custom devnet, we have 2 pairs of Dai/Weth for arbitrage tests
+	DaiWethPair1    = "dai_weth_pair_1"
+	DaiWethPair2    = "dai_weth_pair_2"
+	UniswapFactory1 = "uniswap_factory_1"
+	UniswapFactory2 = "uniswap_factory_2"
+	UniV3SwapRouter = "uniswap_v3_swap_router"
 )
 
 type EthNetworkDetails struct {
@@ -802,3 +817,145 @@ func (b *BuilderSubmitBlockRequest) Withdrawals() []*consensuscapella.Withdrawal
 	}
 	return nil
 }
+
+func encodeTransactions(txs []*types.Transaction) [][]byte {
+	var enc = make([][]byte, len(txs))
+	for i, tx := range txs {
+		enc[i], _ = tx.MarshalBinary()
+	}
+	return enc
+}
+
+func DecodeTransactions(enc [][]byte) ([]*types.Transaction, error) {
+	var txs = make([]*types.Transaction, len(enc))
+	for i, encTx := range enc {
+		var tx types.Transaction
+		if err := tx.UnmarshalBinary(encTx); err != nil {
+			return nil, fmt.Errorf("invalid transaction %d: %v", i, err)
+		}
+		txs[i] = &tx
+	}
+	return txs, nil
+}
+
+type TobTxsSubmitRequest struct {
+	TobTxs     utilbellatrix.ExecutionPayloadTransactions
+	Slot       uint64
+	ParentHash string
+}
+
+type IntermediateTobTxsSubmitRequest struct {
+	TobTxs     []byte `json:"tobTxs"`
+	Slot       uint64 `json:"slot"`
+	ParentHash string `json:"parentHash"`
+}
+
+func (t *TobTxsSubmitRequest) MarshalJSON() ([]byte, error) {
+	txBytes, err := t.TobTxs.MarshalSSZ()
+	if err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(IntermediateTobTxsSubmitRequest{
+		TobTxs:     txBytes,
+		Slot:       t.Slot,
+		ParentHash: t.ParentHash,
+	})
+}
+
+func (t *TobTxsSubmitRequest) UnmarshalJSON(data []byte) error {
+	var intermediateJson IntermediateTobTxsSubmitRequest
+	err := json.Unmarshal(data, &intermediateJson)
+	if err != nil {
+		return err
+	}
+
+	err = t.TobTxs.UnmarshalSSZ(intermediateJson.TobTxs)
+	if err != nil {
+		return err
+	}
+	t.Slot = intermediateJson.Slot
+	t.ParentHash = intermediateJson.ParentHash
+
+	return nil
+}
+
+type BlockAssemblerRequest struct {
+	TobTxs             utilbellatrix.ExecutionPayloadTransactions `json:"tob_txs"`
+	RobPayload         BuilderSubmitBlockRequest                  `json:"rob_payload"`
+	RegisteredGasLimit uint64                                     `json:"registered_gas_limit,string"`
+}
+
+type IntermediateBlockAssemblerRequest struct {
+	TobTxs             []byte `json:"tob_txs"`
+	RobPayload         []byte `json:"rob_payload"`
+	RegisteredGasLimit uint64 `json:"registered_gas_limit,string"`
+}
+
+func (r *BlockAssemblerRequest) MarshalJSON() ([]byte, error) {
+	sszedTobTxs, err := r.TobTxs.MarshalSSZ()
+	if err != nil {
+		return nil, err
+	}
+	encodedRobPayload, err := r.RobPayload.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	intermediateStruct := IntermediateBlockAssemblerRequest{
+		TobTxs:             sszedTobTxs,
+		RobPayload:         encodedRobPayload,
+		RegisteredGasLimit: r.RegisteredGasLimit,
+	}
+
+	return json.Marshal(intermediateStruct)
+}
+
+func (b *BlockAssemblerRequest) UnmarshalJSON(data []byte) error {
+	var intermediateJson IntermediateBlockAssemblerRequest
+	err := json.Unmarshal(data, &intermediateJson)
+	if err != nil {
+		return err
+	}
+	err = b.TobTxs.UnmarshalSSZ(intermediateJson.TobTxs)
+	if err != nil {
+		return err
+	}
+	b.RegisteredGasLimit = intermediateJson.RegisteredGasLimit
+	blockRequest := new(BuilderSubmitBlockRequest)
+	err = json.Unmarshal(intermediateJson.RobPayload, &blockRequest)
+	if err != nil {
+		return err
+	}
+	b.RobPayload = *blockRequest
+
+	return nil
+}
+
+// callLog is the result of LOG opCode
+type CallLog struct {
+	Address common.Address `json:"address"`
+	Topics  []common.Hash  `json:"topics"`
+	Data    hexutil.Bytes  `json:"data"`
+}
+
+type CallTrace struct {
+	From         common.Address  `json:"from"`
+	Gas          *hexutil.Uint64 `json:"gas"`
+	GasUsed      *hexutil.Uint64 `json:"gasUsed"`
+	To           *common.Address `json:"to,omitempty"`
+	Input        hexutil.Bytes   `json:"input"`
+	Output       hexutil.Bytes   `json:"output,omitempty"`
+	Error        string          `json:"error,omitempty"`
+	RevertReason string          `json:"revertReason,omitempty"`
+	Calls        []CallTrace     `json:"calls,omitempty"`
+	Logs         []CallLog       `json:"logs,omitempty"`
+	Value        *hexutil.Big    `json:"value,omitempty"`
+	// Gencodec adds overridden fields at the end
+	Type string `json:"type"`
+}
+
+type CallTraceResponse struct {
+	Result CallTrace `json:"result"`
+}
+
+type NetworkStateInterferenceChecker func(CallTrace) (bool, error)

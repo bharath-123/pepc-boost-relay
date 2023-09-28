@@ -20,6 +20,7 @@ import (
 	v1 "github.com/attestantio/go-builder-client/api/v1"
 	capellaspec "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
@@ -246,4 +247,14 @@ func GetEnvDurationSec(key string, defaultValueSec int) time.Duration {
 		}
 	}
 	return time.Duration(defaultValueSec) * time.Second
+}
+
+func GetMethodArgs(data []byte, method string, contractAbi *abi.ABI) (interface{}, error) {
+	abiMethod := contractAbi.Methods[method]
+	res, err := abiMethod.Inputs.Unpack(data[4:])
+	if err != nil {
+		return nil, err
+	}
+
+	return res[0], nil
 }

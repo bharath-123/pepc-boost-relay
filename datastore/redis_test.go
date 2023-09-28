@@ -13,6 +13,8 @@ import (
 	v1 "github.com/attestantio/go-builder-client/api/v1"
 	"github.com/attestantio/go-builder-client/spec"
 	consensusspec "github.com/attestantio/go-eth2-client/spec"
+	common2 "github.com/ethereum/go-ethereum/common"
+	gethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/mev-boost-relay/common"
 	"github.com/go-redis/redis/v9"
@@ -507,6 +509,88 @@ func TestPipelineNilCheck(t *testing.T) {
 	f, err := cache.GetFloorBidValue(context.Background(), cache.NewPipeline(), 0, "1", "2")
 	require.NoError(t, err, err)
 	require.Equal(t, big.NewInt(0), f)
+}
+
+func TestSetTobTxs(t *testing.T) {
+	cache := setupTestRedis(t)
+
+	slot := uint64(123)
+	parentHash := "0x13e606c7b3d1faad7e83503ce3dedce4c6bb89b0c28ffb240d713c7b110b9747"
+
+	// Get the TOB txs
+	_, err := cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
+		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash)
+		require.NoError(t, err)
+		require.Equal(t, b, [][]byte{})
+		return nil
+	})
+
+	addr1 := common2.HexToAddress("0x878705ba3f8Bc32FCf7F4CAa1A35E72AF65CF766")
+	addr2 := common2.HexToAddress("0x4E9A3d9D1cd2A2b2371b8b3F489aE72259886f1A")
+
+	tx1 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    1,
+		GasPrice: big.NewInt(1),
+		Gas:      1,
+		To:       &addr1,
+		Value:    big.NewInt(1),
+		Data:     []byte("tx1"),
+	})
+	tx2 := gethtypes.NewTx(&gethtypes.LegacyTx{
+		Nonce:    2,
+		GasPrice: big.NewInt(2),
+		Gas:      2,
+		To:       &addr2,
+		Value:    big.NewInt(2),
+		Data:     []byte("tx2"),
+	})
+	tx1byte, err := tx1.MarshalBinary()
+	require.NoError(t, err)
+	tx2byte, err := tx2.MarshalBinary()
+	require.NoError(t, err)
+
+	txs := types.Transactions{
+		Transactions: [][]byte{tx1byte, tx2byte},
+	}
+
+	_, err = cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
+		return cache.SetTobTx(context.Background(), tx, slot, parentHash, txs.Transactions)
+	})
+	require.NoError(t, err)
+
+	_, err = cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
+		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash)
+		require.NoError(t, err)
+		require.Equal(t, b, txs.Transactions)
+		return nil
+	})
+}
+
+func TestSetTobTxValue(t *testing.T) {
+	cache := setupTestRedis(t)
+
+	slot := uint64(123)
+	parentHash := "0x13e606c7b3d1faad7e83503ce3dedce4c6bb89b0c28ffb240d713c7b110b9747"
+
+	// Set a value
+	value := big.NewInt(123)
+	_, err := cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
+		v, err := cache.GetTobTxValue(context.Background(), tx, slot, parentHash)
+		require.NoError(t, err)
+		require.Equal(t, v, big.NewInt(0))
+
+		err = cache.SetTobTxValue(context.Background(), tx, value, slot, parentHash)
+		require.NoError(t, err)
+
+		// Get the value back
+		v, err = cache.GetTobTxValue(context.Background(), tx, slot, parentHash)
+		require.NoError(t, err)
+		require.Equal(t, v, big.NewInt(123))
+
+		return nil
+	})
+
+	require.NoError(t, err)
 }
 
 // func TestPipeline(t *testing.T) {
