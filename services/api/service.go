@@ -1874,18 +1874,21 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uin
 	if len(txs) == 1 {
 		return fmt.Errorf("We require a payment tx along with the TOB txs!")
 	}
+	if len(txs) > 2 {
+		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
+	}
 
 	// Start: Payout checks
 	lastTx := txs[len(txs)-1]
 
-	if lastTx.To() != nil && lastTx.To().String() != validatorFeeRecipient.String() {
+	if lastTx.To() != nil && strings.ToLower(lastTx.To().String()) != validatorFeeRecipient.String() {
 		return fmt.Errorf("we require a payment tx to the proposer fee recipient along with the TOB txs")
 	}
 	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
 		return fmt.Errorf("the proposer payment tx is non-zero")
 	}
 	if len(lastTx.Data()) != 0 {
-		return fmt.Errorf("the relayer payment tx has malformed data")
+		return fmt.Errorf("the proposer payment tx has malformed data")
 	}
 
 	// State interference checks

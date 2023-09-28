@@ -418,6 +418,13 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 	_, _, backend := startTestBackend(t, common.EthNetworkCustom)
 	randomAddress := common2.BytesToAddress([]byte("0xabc"))
 
+	// Payload attributes
+	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
+
+	headSlotProposerFeeRecipient := common2.HexToAddress(backend.relay.proposerDutiesMap[headSlot+1].Entry.Message.FeeRecipient.String())
+
 	cases := []struct {
 		description   string
 		txs           []*gethtypes.Transaction
@@ -437,7 +444,7 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &randomAddress,
 					Value:    big.NewInt(2),
 					Data:     []byte(""),
 				}),
@@ -466,7 +473,7 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 				}),
 			},
 			callTraces:    nil,
-			requiredError: "we require a payment tx to the relayer along with the TOB txs",
+			requiredError: "we require a payment tx to the proposer fee recipient along with the TOB txs",
 		},
 		{
 			description: "zero value payout",
@@ -483,13 +490,13 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(0),
 					Data:     []byte(""),
 				}),
 			},
 			callTraces:    nil,
-			requiredError: "the relayer payment tx is non-zero",
+			requiredError: "the proposer payment tx is non-zero",
 		},
 		{
 			description: "malformed payout",
@@ -506,13 +513,13 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(110),
 					Data:     []byte("tx2"),
 				}),
 			},
 			callTraces:    nil,
-			requiredError: "the relayer payment tx has malformed data",
+			requiredError: "the proposer payment tx has malformed data",
 		},
 		{
 			description: "More than 2 txs sent",
@@ -537,7 +544,7 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &randomAddress,
 					Value:    big.NewInt(110),
 					Data:     []byte(""),
 				}),
@@ -560,7 +567,7 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(110),
 					Data:     []byte(""),
 				}),
@@ -577,7 +584,7 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 				callTrace:   c.callTraces,
 			}
 
-			err := backend.relay.checkTxAndSenderValidity(c.txs, common.TestLog)
+			err := backend.relay.checkTxAndSenderValidity(c.txs, headSlot+1, common.TestLog)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
 			} else {
@@ -592,6 +599,13 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 
 	validWethDaiTx, validWethDaiTxTrace, invalidWethDaiTx, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
 	validEthUsdcTx, validEthUsdcTxTrace, invalidEthUsdcTx, invalidEthUsdcTxTrace := GetGoerliTracingRelatedTestData(t)
+
+	// Payload attributes
+	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
+
+	headSlotProposerFeeRecipient := common2.HexToAddress(backend.relay.proposerDutiesMap[headSlot+1].Entry.Message.FeeRecipient.String())
 
 	cases := []struct {
 		description   string
@@ -615,7 +629,7 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(110),
 					Data:     []byte(""),
 				}),
@@ -639,7 +653,7 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(110),
 					Data:     []byte(""),
 				}),
@@ -663,7 +677,7 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(110),
 					Data:     []byte(""),
 				}),
@@ -687,7 +701,7 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(110),
 					Data:     []byte(""),
 				}),
@@ -711,7 +725,7 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 
 			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
-			err := backend.relay.checkTxAndSenderValidity(c.txs, common.TestLog)
+			err := backend.relay.checkTxAndSenderValidity(c.txs, headSlot+1, common.TestLog)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
 			} else {
@@ -727,6 +741,13 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 
 	validWethDaiTx, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
 	validEthUsdcTx, validEthUsdcTxTrace, _, _ := GetGoerliTracingRelatedTestData(t)
+
+	// Payload attributes
+	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
+
+	headSlotProposerFeeRecipient := common2.HexToAddress(backend.relay.proposerDutiesMap[headSlot+1].Entry.Message.FeeRecipient.String())
 
 	cases := []struct {
 		description        string
@@ -752,7 +773,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(2),
 					Data:     []byte(""),
 				}),
@@ -770,7 +791,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(10),
 					Data:     []byte(""),
 				}),
@@ -795,7 +816,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(2),
 					Data:     []byte(""),
 				}),
@@ -813,7 +834,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(1),
 					Data:     []byte(""),
 				}),
@@ -838,7 +859,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(2),
 					Data:     []byte(""),
 				}),
@@ -856,7 +877,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(1),
 					Data:     []byte(""),
 				}),
@@ -881,7 +902,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(2),
 					Data:     []byte(""),
 				}),
@@ -899,7 +920,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(10),
 					Data:     []byte(""),
 				}),
@@ -989,6 +1010,13 @@ func TestSubmitTobTxs(t *testing.T) {
 	validWethDaiTx, validWethDaiTxTrace, _, invalidWethDaiTrace := GetCustomDevnetTracingRelatedTestData(t)
 	validEthUsdcTx, validEthUsdcTxTrace, invalidEthUsdcTx, invalidEthUsdcTxTrace := GetGoerliTracingRelatedTestData(t)
 
+	// Payload attributes
+	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
+
+	headSlotProposerFeeRecipient := common2.HexToAddress(backend.relay.proposerDutiesMap[headSlot+1].Entry.Message.FeeRecipient.String())
+
 	cases := []struct {
 		description   string
 		tobTxs        []*gethtypes.Transaction
@@ -1034,7 +1062,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			requiredError: "we require a payment tx to the relayer along with the TOB txs",
+			requiredError: "we require a payment tx to the proposer fee recipient along with the TOB txs",
 			traces:        nil,
 			network:       common.EthNetworkCustom,
 			slotDelta:     1,
@@ -1054,7 +1082,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(5),
 					Data:     []byte(""),
 				}),
@@ -1079,7 +1107,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(5),
 					Data:     []byte(""),
 				}),
@@ -1104,7 +1132,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(5),
 					Data:     []byte(""),
 				}),
@@ -1137,7 +1165,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(10),
 					Data:     []byte(""),
 				}),
@@ -1162,7 +1190,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(10),
 					Data:     []byte(""),
 				}),
@@ -1187,7 +1215,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(10),
 					Data:     []byte(""),
 				}),
@@ -1201,9 +1229,9 @@ func TestSubmitTobTxs(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
-			backend := newTestBackend(t, 1, c.network)
+			backend = newTestBackend(t, 1, c.network)
 
-			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot = GetTestPayloadAttributes(t)
 
 			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 			if c.traces == nil {
@@ -1306,6 +1334,13 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 	validWethDaiTx, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
 	validEthUsdcTx, validEthUsdcTxTrace, _, _ := GetGoerliTracingRelatedTestData(t)
 
+	// Payload attributes
+	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
+
+	headSlotProposerFeeRecipient := common2.HexToAddress(backend.relay.proposerDutiesMap[headSlot+1].Entry.Message.FeeRecipient.String())
+
 	cases := []struct {
 		description        string
 		firstTobTxs        []*gethtypes.Transaction
@@ -1330,7 +1365,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(2),
 					Data:     []byte(""),
 				}),
@@ -1348,7 +1383,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(10),
 					Data:     []byte(""),
 				}),
@@ -1373,7 +1408,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(2),
 					Data:     []byte(""),
 				}),
@@ -1391,7 +1426,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(1),
 					Data:     []byte(""),
 				}),
@@ -1416,7 +1451,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(2),
 					Data:     []byte(""),
 				}),
@@ -1434,7 +1469,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(1),
 					Data:     []byte(""),
 				}),
@@ -1459,7 +1494,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(2),
 					Data:     []byte(""),
 				}),
@@ -1477,7 +1512,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
 					Gas:      12,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(10),
 					Data:     []byte(""),
 				}),
@@ -1491,9 +1526,9 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
-			backend := newTestBackend(t, 1, c.network)
+			backend = newTestBackend(t, 1, c.network)
 
-			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot = GetTestPayloadAttributes(t)
 
 			submissionSlot := headSlot + 1
 			submissionTimestamp := 1606824419
@@ -1612,6 +1647,13 @@ func TestSubmitBuilderBlock(t *testing.T) {
 	validWethDaiTx, validWethDaiTxTrace, _, _ := GetCustomDevnetTracingRelatedTestData(t)
 	validEthUsdcTx, validEthUsdcTxTrace, _, _ := GetGoerliTracingRelatedTestData(t)
 
+	// Payload attributes
+	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
+
+	headSlotProposerFeeRecipient := common2.HexToAddress(backend.relay.proposerDutiesMap[headSlot+1].Entry.Message.FeeRecipient.String())
+
 	cases := []struct {
 		description   string
 		tobTxs        []*gethtypes.Transaction
@@ -1641,7 +1683,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(110),
 					Data:     []byte(""),
 				}),
@@ -1665,7 +1707,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &backend.relay.relayerPayoutAddress,
+					To:       &headSlotProposerFeeRecipient,
 					Value:    big.NewInt(110),
 					Data:     []byte(""),
 				}),
