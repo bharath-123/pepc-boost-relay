@@ -1937,13 +1937,13 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uint64, log *logrus.Entry) error {
 	// TODO - Payouts need to be modelled more efficiently
 
-	api.proposerDutiesLock.RLock()
-	slotDuty, ok := api.proposerDutiesMap[slot]
-	api.proposerDutiesLock.RUnlock()
+	api.payloadAttributesLock.RLock()
+	slotDuty, ok := api.payloadAttributesBySlot[slot]
+	api.payloadAttributesLock.RUnlock()
 	if !ok {
 		return fmt.Errorf("could not find slot duty")
 	}
-	validatorFeeRecipient := slotDuty.Entry.Message.FeeRecipient
+	validatorFeeRecipient := slotDuty.payloadAttributes.SuggestedFeeRecipient
 
 	if len(txs) == 0 {
 		return fmt.Errorf("Empty TOB tx request sent!")
@@ -1958,7 +1958,7 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uin
 	// Start: Payout checks
 	lastTx := txs[len(txs)-1]
 
-	if lastTx.To() != nil && strings.ToLower(lastTx.To().String()) != validatorFeeRecipient.String() {
+	if lastTx.To() != nil && strings.ToLower(lastTx.To().String()) != validatorFeeRecipient {
 		return fmt.Errorf("we require a payment tx to the proposer fee recipient along with the TOB txs")
 	}
 	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
