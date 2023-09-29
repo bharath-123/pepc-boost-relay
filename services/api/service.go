@@ -2318,115 +2318,184 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 
 	// TODO - if there are no ToB txs but we have encountered the highest bid, simulate the block instead of assembling it
 
-	// we have a TOB tx, now assemble the block. Block assembly has the same properties as simulation but returns the final
-	// execution payload. If there are no TOB txs, we send an empty list to the assembler
-	assemblyResultC := make(chan *blockAssemblyResult, 1)
+	var builderSubmission *common.BuilderSubmitBlockRequest
 	var eligibleAt time.Time // will be set once the bid is ready
+	if len(tobTxs) > 0 {
+		// we have a TOB tx, now assemble the block. Block assembly has the same properties as simulation but returns the final
+		// execution payload. If there are no TOB txs, we send an empty list to the assembler
+		assemblyResultC := make(chan *blockAssemblyResult, 1)
 
-	// Deferred saving of the builder submission to database (whenever this function ends)
-	defer func() {
-		savePayloadToDatabase := !api.ffDisablePayloadDBStorage
-		var res *blockAssemblyResult
-		select {
-		case res = <-assemblyResultC:
-		case <-time.After(10 * time.Second):
-			log.Warn("timed out waiting for assembly result")
-			res = &blockAssemblyResult{
-				assembledPayload: nil,
-				requestErr:       nil,
-				validationErr:    nil,
+		// Deferred saving of the builder submission to database (whenever this function ends)
+		defer func() {
+			savePayloadToDatabase := !api.ffDisablePayloadDBStorage
+			var res *blockAssemblyResult
+			select {
+			case res = <-assemblyResultC:
+			case <-time.After(10 * time.Second):
+				log.Warn("timed out waiting for assembly result")
+				res = &blockAssemblyResult{
+					assembledPayload: nil,
+					requestErr:       nil,
+					validationErr:    nil,
+				}
+			}
+
+			submissionEntry, err := api.db.SaveBuilderBlockSubmission(res.assembledPayload, res.requestErr, res.validationErr, receivedAt, eligibleAt, true, savePayloadToDatabase, pf, false)
+			if err != nil {
+				log.WithError(err).WithField("payload", payload).Error("saving builder block submission to database failed")
+				return
+			}
+			err = api.db.UpsertBlockBuilderEntryAfterSubmission(submissionEntry, false)
+			if err != nil {
+				log.WithError(err).Error("failed to upsert block-builder-entry")
+			}
+		}()
+
+		tobTxsToSendToAssembler := bellatrix.ExecutionPayloadTransactions{
+			Transactions: []bellatrix2.Transaction{},
+		}
+
+		for _, tobTxByte := range tobTxs {
+			tobTxsToSendToAssembler.Transactions = append(tobTxsToSendToAssembler.Transactions, tobTxByte)
+		}
+
+		opts := blockAssemblyOptions{
+			log: log,
+			req: &common.BlockAssemblerRequest{
+				TobTxs:             tobTxsToSendToAssembler,
+				RobPayload:         *payload,
+				RegisteredGasLimit: gasLimit,
+			},
+		}
+
+		timeBeforeAssembly := time.Now().UTC()
+
+		log = log.WithFields(logrus.Fields{
+			"timestampBeforeAssembly": timeBeforeAssembly.UTC().UnixMilli(),
+		})
+
+		assembledPayload, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
+		builderSubmission = &common.BuilderSubmitBlockRequest{
+			Bellatrix: payload.Bellatrix,
+			Capella: &builderCapella.SubmitBlockRequest{
+				Message: &v1.BidTrace{
+					Slot:                 payload.Message().Slot,
+					ParentHash:           assembledPayload.ParentHash,
+					BlockHash:            assembledPayload.BlockHash,
+					BuilderPubkey:        payload.Message().BuilderPubkey,
+					ProposerPubkey:       payload.Message().ProposerPubkey,
+					ProposerFeeRecipient: assembledPayload.FeeRecipient,
+					GasLimit:             assembledPayload.GasLimit,
+					GasUsed:              assembledPayload.GasUsed,
+					Value:                uint256.NewInt(totalBidValue.Uint64()),
+				},
+				ExecutionPayload: assembledPayload,
+				// TODO - This signature will be invalid and we can't get the valid one since we need the builder private key
+				// we could use a set of keys from relayer to sign the message. This is a TODO for now because this signature
+				// is not being checked anywhere once the bid is stored in the db
+				Signature: payload.Signature(),
+			},
+		}
+		assemblyResultC <- &blockAssemblyResult{
+			assembledPayload: builderSubmission,
+			requestErr:       requestErr,
+			validationErr:    validationErr,
+		}
+		assemblyDurationMs := time.Since(timeBeforeAssembly).Milliseconds()
+		log = log.WithFields(logrus.Fields{
+			"timestampAfterAssembly": time.Now().UTC().UnixMilli(),
+			"assemblyDurationMs":     assemblyDurationMs,
+		})
+		if requestErr != nil { // Request error
+			if os.IsTimeout(requestErr) {
+				api.RespondError(w, http.StatusGatewayTimeout, "assembly request timeout")
+			} else {
+				api.RespondError(w, http.StatusBadRequest, requestErr.Error())
+			}
+			return
+		} else {
+			if validationErr != nil {
+				api.RespondError(w, http.StatusBadRequest, validationErr.Error())
+				return
+			}
+		}
+	} else {
+		simResultC := make(chan *blockSimResult, 1)
+
+		defer func() {
+			savePayloadToDatabase := !api.ffDisablePayloadDBStorage
+			var simResult *blockSimResult
+			select {
+			case simResult = <-simResultC:
+			case <-time.After(10 * time.Second):
+				log.Warn("timed out waiting for simulation result")
+				simResult = &blockSimResult{false, false, nil, nil}
+			}
+
+			submissionEntry, err := api.db.SaveBuilderBlockSubmission(payload, simResult.requestErr, simResult.validationErr, receivedAt, eligibleAt, simResult.wasSimulated, savePayloadToDatabase, pf, simResult.optimisticSubmission)
+			if err != nil {
+				log.WithError(err).WithField("payload", payload).Error("saving builder block submission to database failed")
+				return
+			}
+
+			err = api.db.UpsertBlockBuilderEntryAfterSubmission(submissionEntry, simResult.validationErr != nil)
+			if err != nil {
+				log.WithError(err).Error("failed to upsert block-builder-entry")
+			}
+		}()
+
+		// Construct simulation request
+		opts := blockSimOptions{
+			isHighPrio: builderEntry.status.IsHighPrio,
+			fastTrack:  builderEntry.status.IsHighPrio && bidIsTopBid && !isLargeRequest,
+			log:        log,
+			builder:    builderEntry,
+			req: &common.BuilderBlockValidationRequest{
+				BuilderSubmitBlockRequest: *payload,
+				RegisteredGasLimit:        gasLimit,
+			},
+		}
+
+		timeBeforeValidation := time.Now().UTC()
+
+		log = log.WithFields(logrus.Fields{
+			"timestampBeforeValidation": timeBeforeValidation.UTC().UnixMilli(),
+		})
+
+		// Simulate block (synchronously).
+		requestErr, validationErr := api.simulateBlock(context.Background(), opts) // success/error logging happens inside
+		simResultC <- &blockSimResult{requestErr == nil, false, requestErr, validationErr}
+		validationDurationMs := time.Since(timeBeforeValidation).Milliseconds()
+		log = log.WithFields(logrus.Fields{
+			"timestampAfterValidation": time.Now().UTC().UnixMilli(),
+			"validationDurationMs":     validationDurationMs,
+		})
+		if requestErr != nil { // Request error
+			if os.IsTimeout(requestErr) {
+				api.RespondError(w, http.StatusGatewayTimeout, "validation request timeout")
+			} else {
+				api.RespondError(w, http.StatusBadRequest, requestErr.Error())
+			}
+			return
+		} else {
+			if validationErr != nil {
+				api.RespondError(w, http.StatusBadRequest, validationErr.Error())
+				return
 			}
 		}
 
-		submissionEntry, err := api.db.SaveBuilderBlockSubmission(res.assembledPayload, res.requestErr, res.validationErr, receivedAt, eligibleAt, true, savePayloadToDatabase, pf, false)
-		if err != nil {
-			log.WithError(err).WithField("payload", payload).Error("saving builder block submission to database failed")
-			return
-		}
-		err = api.db.UpsertBlockBuilderEntryAfterSubmission(submissionEntry, false)
-		if err != nil {
-			log.WithError(err).Error("failed to upsert block-builder-entry")
-		}
-	}()
-
-	tobTxsToSendToAssembler := bellatrix.ExecutionPayloadTransactions{
-		Transactions: []bellatrix2.Transaction{},
-	}
-
-	for _, tobTxByte := range tobTxs {
-		tobTxsToSendToAssembler.Transactions = append(tobTxsToSendToAssembler.Transactions, tobTxByte)
-	}
-
-	opts := blockAssemblyOptions{
-		log: log,
-		req: &common.BlockAssemblerRequest{
-			TobTxs:             tobTxsToSendToAssembler,
-			RobPayload:         *payload,
-			RegisteredGasLimit: gasLimit,
-		},
-	}
-
-	timeBeforeAssembly := time.Now().UTC()
-
-	log = log.WithFields(logrus.Fields{
-		"timestampBeforeAssembly": timeBeforeAssembly.UTC().UnixMilli(),
-	})
-
-	assembledPayload, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
-	assembledBuilderSubmission := &common.BuilderSubmitBlockRequest{
-		Bellatrix: payload.Bellatrix,
-		Capella: &builderCapella.SubmitBlockRequest{
-			Message: &v1.BidTrace{
-				Slot:                 payload.Message().Slot,
-				ParentHash:           assembledPayload.ParentHash,
-				BlockHash:            assembledPayload.BlockHash,
-				BuilderPubkey:        payload.Message().BuilderPubkey,
-				ProposerPubkey:       payload.Message().ProposerPubkey,
-				ProposerFeeRecipient: assembledPayload.FeeRecipient,
-				GasLimit:             assembledPayload.GasLimit,
-				GasUsed:              assembledPayload.GasUsed,
-				Value:                uint256.NewInt(totalBidValue.Uint64()),
-			},
-			ExecutionPayload: assembledPayload,
-			// TODO - This signature will be invalid and we can't get the valid one since we need the builder private key
-			// we could use a set of keys from relayer to sign the message. This is a TODO for now because this signature
-			// is not being checked anywhere once the bid is stored in the db
-			Signature: payload.Signature(),
-		},
-	}
-	assemblyResultC <- &blockAssemblyResult{
-		assembledPayload: assembledBuilderSubmission,
-		requestErr:       requestErr,
-		validationErr:    validationErr,
-	}
-	assemblyDurationMs := time.Since(timeBeforeAssembly).Milliseconds()
-	log = log.WithFields(logrus.Fields{
-		"timestampAfterAssembly": time.Now().UTC().UnixMilli(),
-		"assemblyDurationMs":     assemblyDurationMs,
-	})
-	if requestErr != nil { // Request error
-		if os.IsTimeout(requestErr) {
-			api.RespondError(w, http.StatusGatewayTimeout, "assembly request timeout")
-		} else {
-			api.RespondError(w, http.StatusBadRequest, requestErr.Error())
-		}
-		return
-	} else {
-		if validationErr != nil {
-			api.RespondError(w, http.StatusBadRequest, validationErr.Error())
-			return
-		}
+		builderSubmission = payload
 	}
 
 	// Prepare the response data
-	getHeaderResponse, err := common.BuildGetHeaderResponse(assembledBuilderSubmission, api.blsSk, api.publicKey, api.opts.EthNetDetails.DomainBuilder)
+	getHeaderResponse, err := common.BuildGetHeaderResponse(builderSubmission, api.blsSk, api.publicKey, api.opts.EthNetDetails.DomainBuilder)
 	if err != nil {
 		log.WithError(err).Error("could not sign builder bid")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	getPayloadResponse, err := common.BuildGetPayloadResponse(assembledBuilderSubmission)
+	getPayloadResponse, err := common.BuildGetPayloadResponse(builderSubmission)
 	if err != nil {
 		log.WithError(err).Error("could not build getPayload response")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
@@ -2435,15 +2504,15 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 
 	// This will be the assembled payload
 	bidTrace := common.BidTraceV2{
-		BidTrace:    *assembledBuilderSubmission.Message(),
-		BlockNumber: assembledBuilderSubmission.BlockNumber(),
-		NumTx:       uint64(assembledBuilderSubmission.NumTx()),
+		BidTrace:    *builderSubmission.Message(),
+		BlockNumber: builderSubmission.BlockNumber(),
+		NumTx:       uint64(builderSubmission.NumTx()),
 	}
 
 	//
 	// Save to Redis
 	//
-	updateBidResult, err := api.redis.SaveBidAndUpdateTopBid(context.Background(), tx, &bidTrace, assembledBuilderSubmission, getPayloadResponse, getHeaderResponse, receivedAt, false, nil)
+	updateBidResult, err := api.redis.SaveBidAndUpdateTopBid(context.Background(), tx, &bidTrace, builderSubmission, getPayloadResponse, getHeaderResponse, receivedAt, false, nil)
 	if err != nil {
 		log.WithError(err).Error("could not save bid and update top bids")
 		api.RespondError(w, http.StatusInternalServerError, "failed saving and updating bid")
