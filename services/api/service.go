@@ -227,9 +227,11 @@ type RelayAPI struct {
 	proposerDutiesSlot       uint64
 	isUpdatingProposerDuties uberatomic.Bool
 
+	// TODO - bchain - merge all these clients into one, since they all call the same EC client
 	blockSimRateLimiter IBlockSimRateLimiter
 	blockAssembler      IBlockAssembler
 	tracer              ITracer
+	EcClient            IEcClient
 
 	validatorRegC chan boostTypes.SignedValidatorRegistration
 
@@ -332,6 +334,11 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 		}
 	}
 
+	ecClient, err := NewEcClient(opts.BlockSimURL)
+	if err != nil {
+		return nil, err
+	}
+
 	api = &RelayAPI{
 		opts:         opts,
 		log:          opts.Log,
@@ -350,6 +357,7 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 		blockSimRateLimiter:    NewBlockSimulationRateLimiter(opts.BlockSimURL),
 		blockAssembler:         NewBlockAssembler(opts.BlockSimURL),
 		tracer:                 NewTracer(opts.BlockSimURL),
+		EcClient:               ecClient,
 
 		validatorRegC: make(chan boostTypes.SignedValidatorRegistration, 450_000),
 
@@ -1914,12 +1922,37 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 		return fmt.Errorf("contract creation cannot be a TOB tx")
 	}
 
+	signer := types.NewCancunSigner(firstTx.ChainId())
+	sender, err := signer.Sender(firstTx)
+	if err != nil {
+		return err
+	}
+
+	// check sender nonce and balance
+	senderNonce, err := api.EcClient.GetLatestNonce(sender)
+	if err != nil {
+		return err
+	}
+	if firstTx.Nonce() != senderNonce {
+		return fmt.Errorf("the tob tx has incorrect nonce")
+	}
+	senderBalance, err := api.EcClient.GetLatestBalance(sender)
+	if err != nil {
+		return err
+	}
+	if senderBalance.Cmp(firstTx.Value()) < 0 {
+		return fmt.Errorf("the tob tx has insufficient balance")
+	}
+
 	txTraces, err := api.getTraces(context.Background(), tracerOptions{
 		log: log,
 		tx:  firstTx,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to get traces: %s", err.Error())
+	}
+	if txTraces.Result.Error != "" {
+		return fmt.Errorf("tx failed with: %s", txTraces.Result.Error)
 	}
 
 	res, err := api.StateInterferenceChecks(&txTraces.Result)
@@ -1966,6 +1999,28 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uin
 	}
 	if len(lastTx.Data()) != 0 {
 		return fmt.Errorf("the proposer payment tx has malformed data")
+	}
+
+	signer := types.NewCancunSigner(lastTx.ChainId())
+	sender, err := signer.Sender(lastTx)
+	if err != nil {
+		return err
+	}
+
+	// checker sender nonce and balance
+	payoutSenderNonce, err := api.EcClient.GetLatestNonce(sender)
+	if err != nil {
+		return err
+	}
+	if lastTx.Nonce() != payoutSenderNonce {
+		return fmt.Errorf("the proposer payment tx has incorrect nonce")
+	}
+	payoutSenderBalance, err := api.EcClient.GetLatestBalance(sender)
+	if err != nil {
+		return err
+	}
+	if payoutSenderBalance.Cmp(lastTx.Value()) < 0 {
+		return fmt.Errorf("the proposer payment tx has insufficient balance")
 	}
 
 	// State interference checks
@@ -2075,8 +2130,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	// TODO - bchain - simulate the txs on the parent block. If it fails, reject the txs.
-	// This is already solved and should be straightforward to implement. its basically tx simulation
+	// TODO - check if the user has enough balance and the nonce is correct on the top tx
 
 	// add the tob tx to the redis cache
 	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
