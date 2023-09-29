@@ -1910,43 +1910,11 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 }
 
 // Checks the quality of the TOB txs, if it is the txs expected in a TOB
-func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log *logrus.Entry) error {
-	if len(txs) > 2 {
-		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
-	}
-
-	// get traces
-	firstTx := txs[0]
-	// some sanity checks
-	if firstTx.To() == nil {
-		return fmt.Errorf("contract creation cannot be a TOB tx")
-	}
-
-	signer := types.NewCancunSigner(firstTx.ChainId())
-	sender, err := signer.Sender(firstTx)
-	if err != nil {
-		return err
-	}
-
-	// check sender nonce and balance
-	senderNonce, err := api.EcClient.GetLatestNonce(sender)
-	if err != nil {
-		return err
-	}
-	if firstTx.Nonce() != senderNonce {
-		return fmt.Errorf("the tob tx has incorrect nonce")
-	}
-	senderBalance, err := api.EcClient.GetLatestBalance(sender)
-	if err != nil {
-		return err
-	}
-	if senderBalance.Cmp(firstTx.Value()) < 0 {
-		return fmt.Errorf("the tob tx has insufficient balance")
-	}
+func (api *RelayAPI) checkTobTxsStateInterference(tx *types.Transaction, log *logrus.Entry) error {
 
 	txTraces, err := api.getTraces(context.Background(), tracerOptions{
 		log: log,
-		tx:  firstTx,
+		tx:  tx,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to get traces: %s", err.Error())
@@ -2023,8 +1991,33 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uin
 		return fmt.Errorf("the proposer payment tx has insufficient balance")
 	}
 
+	firstTx := txs[0]
+	// some sanity checks
+	if firstTx.To() == nil {
+		return fmt.Errorf("contract creation cannot be a TOB tx")
+	}
+	sender, err = signer.Sender(firstTx)
+	if err != nil {
+		return err
+	}
+
+	tobSenderNonce, err := api.EcClient.GetLatestNonce(sender)
+	if err != nil {
+		return err
+	}
+	if firstTx.Nonce() != tobSenderNonce {
+		return fmt.Errorf("the proposer payment tx has incorrect nonce")
+	}
+	tobSenderBalance, err := api.EcClient.GetLatestBalance(sender)
+	if err != nil {
+		return err
+	}
+	if tobSenderBalance.Cmp(firstTx.Value()) < 0 {
+		return fmt.Errorf("the proposer payment tx has insufficient balance")
+	}
+
 	// State interference checks
-	return api.checkTobTxsStateInterference(txs, log)
+	return api.checkTobTxsStateInterference(firstTx, log)
 }
 
 func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Request) {

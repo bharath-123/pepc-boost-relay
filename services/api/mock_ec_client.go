@@ -3,21 +3,21 @@ package api
 import "math/big"
 
 type MockEcClient struct {
-	Nonce   uint64
-	Balance *big.Int
+	nonceMap   map[string]uint64
+	balanceMap map[string]*big.Int
 }
 
-func NewMockEcClient(nonce uint64, balance *big.Int) *MockEcClient {
+func NewMockEcClient(nonceMap map[string]uint64, balanceMap map[string]*big.Int) *MockEcClient {
 	return &MockEcClient{
-		Nonce:   nonce,
-		Balance: balance,
+		nonceMap:   nonceMap,
+		balanceMap: balanceMap,
 	}
 }
 
 func (ec *MockEcClient) GetLatestNonce(address string) (uint64, error) {
-	return ec.Nonce, nil
+	return ec.nonceMap[address], nil
 }
 
 func (ec *MockEcClient) GetLatestBalance(address string) (*big.Int, error) {
-	return ec.Balance, nil
+	return ec.balanceMap[address], nil
 }
