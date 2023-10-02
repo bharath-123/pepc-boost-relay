@@ -1963,14 +1963,13 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uin
 		return fmt.Errorf("we require a payment tx to the proposer fee recipient along with the TOB txs")
 	}
 	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
-		return fmt.Errorf("the proposer payment tx is non-zero")
+		return fmt.Errorf("the proposer payment tx shouldn't be non-zero")
 	}
 	if len(lastTx.Data()) != 0 {
 		return fmt.Errorf("the proposer payment tx has malformed data")
 	}
 
-	signer := types.NewCancunSigner(lastTx.ChainId())
-	sender, err := signer.Sender(lastTx)
+	sender, err := api.EcClient.GetSigner(lastTx)
 	if err != nil {
 		return err
 	}
@@ -1992,11 +1991,8 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uin
 	}
 
 	firstTx := txs[0]
-	// some sanity checks
-	if firstTx.To() == nil {
-		return fmt.Errorf("contract creation cannot be a TOB tx")
-	}
-	sender, err = signer.Sender(firstTx)
+
+	sender, err = api.EcClient.GetSigner(firstTx)
 	if err != nil {
 		return err
 	}
@@ -2122,8 +2118,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.Respond(w, http.StatusBadRequest, "TOB tx value is less than the current value!")
 		return
 	}
-
-	// TODO - check if the user has enough balance and the nonce is correct on the top tx
 
 	// add the tob tx to the redis cache
 	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
