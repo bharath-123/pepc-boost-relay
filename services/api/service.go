@@ -227,9 +227,11 @@ type RelayAPI struct {
 	proposerDutiesSlot       uint64
 	isUpdatingProposerDuties uberatomic.Bool
 
+	// TODO - bchain - merge all these clients into one, since they all call the same EC client
 	blockSimRateLimiter IBlockSimRateLimiter
 	blockAssembler      IBlockAssembler
 	tracer              ITracer
+	EcClient            IEcClient
 
 	validatorRegC chan boostTypes.SignedValidatorRegistration
 
@@ -332,6 +334,11 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 		}
 	}
 
+	ecClient, err := NewEcClient(opts.BlockSimURL)
+	if err != nil {
+		return nil, err
+	}
+
 	api = &RelayAPI{
 		opts:         opts,
 		log:          opts.Log,
@@ -350,6 +357,7 @@ func NewRelayAPI(opts RelayAPIOpts) (api *RelayAPI, err error) {
 		blockSimRateLimiter:    NewBlockSimulationRateLimiter(opts.BlockSimURL),
 		blockAssembler:         NewBlockAssembler(opts.BlockSimURL),
 		tracer:                 NewTracer(opts.BlockSimURL),
+		EcClient:               ecClient,
 
 		validatorRegC: make(chan boostTypes.SignedValidatorRegistration, 450_000),
 
@@ -1902,24 +1910,17 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 }
 
 // Checks the quality of the TOB txs, if it is the txs expected in a TOB
-func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log *logrus.Entry) error {
-	if len(txs) > 2 {
-		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
-	}
-
-	// get traces
-	firstTx := txs[0]
-	// some sanity checks
-	if firstTx.To() == nil {
-		return fmt.Errorf("contract creation cannot be a TOB tx")
-	}
+func (api *RelayAPI) checkTobTxsStateInterference(tx *types.Transaction, log *logrus.Entry) error {
 
 	txTraces, err := api.getTraces(context.Background(), tracerOptions{
 		log: log,
-		tx:  firstTx,
+		tx:  tx,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to get traces: %s", err.Error())
+	}
+	if txTraces.Result.Error != "" {
+		return fmt.Errorf("tx failed with: %s", txTraces.Result.Error)
 	}
 
 	res, err := api.StateInterferenceChecks(&txTraces.Result)
@@ -1962,14 +1963,57 @@ func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uin
 		return fmt.Errorf("we require a payment tx to the proposer fee recipient along with the TOB txs")
 	}
 	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
-		return fmt.Errorf("the proposer payment tx is non-zero")
+		return fmt.Errorf("the proposer payment tx shouldn't be non-zero")
 	}
 	if len(lastTx.Data()) != 0 {
 		return fmt.Errorf("the proposer payment tx has malformed data")
 	}
 
+	sender, err := api.EcClient.GetSigner(lastTx)
+	if err != nil {
+		return err
+	}
+
+	// checker sender nonce and balance
+	payoutSenderNonce, err := api.EcClient.GetLatestNonce(sender)
+	if err != nil {
+		return err
+	}
+	if lastTx.Nonce() != payoutSenderNonce {
+		return fmt.Errorf("the proposer payment tx has incorrect nonce")
+	}
+	payoutSenderBalance, err := api.EcClient.GetLatestBalance(sender)
+	if err != nil {
+		return err
+	}
+	if payoutSenderBalance.Cmp(lastTx.Value()) < 0 {
+		return fmt.Errorf("the proposer payment tx has insufficient balance")
+	}
+
+	firstTx := txs[0]
+
+	sender, err = api.EcClient.GetSigner(firstTx)
+	if err != nil {
+		return err
+	}
+
+	tobSenderNonce, err := api.EcClient.GetLatestNonce(sender)
+	if err != nil {
+		return err
+	}
+	if firstTx.Nonce() != tobSenderNonce {
+		return fmt.Errorf("the proposer payment tx has incorrect nonce")
+	}
+	tobSenderBalance, err := api.EcClient.GetLatestBalance(sender)
+	if err != nil {
+		return err
+	}
+	if tobSenderBalance.Cmp(firstTx.Value()) < 0 {
+		return fmt.Errorf("the proposer payment tx has insufficient balance")
+	}
+
 	// State interference checks
-	return api.checkTobTxsStateInterference(txs, log)
+	return api.checkTobTxsStateInterference(firstTx, log)
 }
 
 func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Request) {
@@ -2074,9 +2118,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.Respond(w, http.StatusBadRequest, "TOB tx value is less than the current value!")
 		return
 	}
-
-	// TODO - bchain - simulate the txs on the parent block. If it fails, reject the txs.
-	// This is already solved and should be straightforward to implement. its basically tx simulation
 
 	// add the tob tx to the redis cache
 	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
