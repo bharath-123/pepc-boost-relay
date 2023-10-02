@@ -2010,7 +2010,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.Respond(w, http.StatusBadRequest, "Empty TOB tx request sent!")
 		return
 	}
-	//
+
 	if slot < headSlot {
 		log.Error("TOB tx request for past slot!")
 		api.Respond(w, http.StatusBadRequest, "Submitted TOB tx request for past slot!")
