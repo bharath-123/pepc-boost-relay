@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"testing"
@@ -414,7 +415,7 @@ func TestIsTraceToWEthDaiPair(t *testing.T) {
 
 }
 
-func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
+func TestNetworkIndependentTobTxChecks(t *testing.T) {
 	_, _, backend := startTestBackend(t, common.EthNetworkCustom)
 	randomAddress := common2.BytesToAddress([]byte("0xabc"))
 
@@ -426,16 +427,18 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 	headSlotProposerFeeRecipient := common2.HexToAddress(backend.relay.proposerDutiesMap[headSlot+1].Entry.Message.FeeRecipient.String())
 
 	cases := []struct {
-		description   string
-		txs           []*gethtypes.Transaction
-		callTraces    *common.CallTrace
-		requiredError string
+		description        string
+		txs                []*gethtypes.Transaction
+		callTraces         *common.CallTrace
+		tobSimulationError string
+		requiredError      string
 	}{
 		{
-			description:   "no txs sent",
-			txs:           []*gethtypes.Transaction{},
-			callTraces:    &common.CallTrace{},
-			requiredError: "Empty TOB tx request sent!",
+			description:        "no txs sent",
+			txs:                []*gethtypes.Transaction{},
+			callTraces:         &common.CallTrace{},
+			tobSimulationError: "",
+			requiredError:      "Empty TOB tx request sent!",
 		},
 		{
 			description: "only 1 tx sent",
@@ -449,77 +452,9 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			callTraces:    nil,
-			requiredError: "We require a payment tx along with the TOB txs!",
-		},
-		{
-			description: "payout not addresses to relayer",
-			txs: []*gethtypes.Transaction{
-				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    2,
-					GasPrice: big.NewInt(2),
-					Gas:      2,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(2),
-					Data:     []byte("tx1"),
-				}),
-				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    2,
-					GasPrice: big.NewInt(2),
-					Gas:      2,
-					To:       &randomAddress,
-					Value:    big.NewInt(2),
-					Data:     []byte(""),
-				}),
-			},
-			callTraces:    nil,
-			requiredError: "we require a payment tx to the proposer fee recipient along with the TOB txs",
-		},
-		{
-			description: "zero value payout",
-			txs: []*gethtypes.Transaction{
-				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    2,
-					GasPrice: big.NewInt(2),
-					Gas:      2,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(2),
-					Data:     []byte("tx1"),
-				}),
-				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    2,
-					GasPrice: big.NewInt(2),
-					Gas:      2,
-					To:       &headSlotProposerFeeRecipient,
-					Value:    big.NewInt(0),
-					Data:     []byte(""),
-				}),
-			},
-			callTraces:    nil,
-			requiredError: "the proposer payment tx is non-zero",
-		},
-		{
-			description: "malformed payout",
-			txs: []*gethtypes.Transaction{
-				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    2,
-					GasPrice: big.NewInt(2),
-					Gas:      2,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(2),
-					Data:     []byte("tx1"),
-				}),
-				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    2,
-					GasPrice: big.NewInt(2),
-					Gas:      2,
-					To:       &headSlotProposerFeeRecipient,
-					Value:    big.NewInt(110),
-					Data:     []byte("tx2"),
-				}),
-			},
-			callTraces:    nil,
-			requiredError: "the proposer payment tx has malformed data",
+			callTraces:         nil,
+			tobSimulationError: "",
+			requiredError:      "We require a payment tx along with the TOB txs!",
 		},
 		{
 			description: "More than 2 txs sent",
@@ -553,6 +488,54 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 			requiredError: "we support only 1 tx on the TOB currently, got 3",
 		},
 		{
+			description: "zero value payout",
+			txs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &uniswapV2Addr,
+					Value:    big.NewInt(2),
+					Data:     []byte("tx1"),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(0),
+					Data:     []byte(""),
+				}),
+			},
+			callTraces:         nil,
+			tobSimulationError: "payout tx value is zero",
+			requiredError:      "payout tx value is zero",
+		},
+		{
+			description: "malformed payout",
+			txs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &uniswapV2Addr,
+					Value:    big.NewInt(2),
+					Data:     []byte("tx1"),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(110),
+					Data:     []byte("tx2"),
+				}),
+			},
+			callTraces:         nil,
+			tobSimulationError: "payout tx data is malformed",
+			requiredError:      "payout tx data is malformed",
+		},
+		{
 			description: "First tx is a contract creation",
 			txs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
@@ -572,8 +555,33 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			callTraces:    nil,
-			requiredError: "contract creation cannot be a TOB tx",
+			callTraces:         nil,
+			tobSimulationError: "contract creation txs are not allowed",
+			requiredError:      "contract creation txs are not allowed",
+		},
+		{
+			description: "payout not addresses to relayer",
+			txs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &uniswapV2Addr,
+					Value:    big.NewInt(2),
+					Data:     []byte("tx1"),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &randomAddress,
+					Value:    big.NewInt(2),
+					Data:     []byte(""),
+				}),
+			},
+			callTraces:         nil,
+			tobSimulationError: "payout tx recipient does not match proposer fee recipient",
+			requiredError:      "payout tx recipient does not match proposer fee recipient",
 		},
 	}
 
@@ -583,10 +591,32 @@ func TestNetworkIndependentCheckTxAndSenderValidity(t *testing.T) {
 				tracerError: "",
 				callTrace:   c.callTraces,
 			}
+			if c.tobSimulationError != "" {
+				backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{
+					tobSimulationError: fmt.Errorf(c.tobSimulationError),
+				}
+			}
 
-			err := backend.relay.checkTxAndSenderValidity(c.txs, headSlot+1, common.TestLog)
+			tobTxReqs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
+			for _, tx := range c.txs {
+				txByte, err := tx.MarshalBinary()
+				require.NoError(t, err)
+				tobTxReqs.Transactions = append(tobTxReqs.Transactions, txByte)
+			}
+			req := &common.TobTxsSubmitRequest{
+				ParentHash: parentHash,
+				TobTxs:     tobTxReqs,
+				Slot:       headSlot + 1,
+			}
+			jsonReq, err := req.MarshalJSON()
+			require.NoError(t, err)
+			rr := backend.requestBytes(http.MethodPost, tobTxSubmitPath, jsonReq, map[string]string{
+				"Content-Type": "application/json",
+			})
+
 			if c.requiredError != "" {
-				require.Contains(t, err.Error(), c.requiredError)
+				require.Equal(t, http.StatusBadRequest, rr.Code)
+				require.Contains(t, rr.Body.String(), c.requiredError)
 			} else {
 				require.NoError(t, err)
 			}
@@ -725,7 +755,7 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 
 			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
-			err := backend.relay.checkTxAndSenderValidity(c.txs, headSlot+1, common.TestLog)
+			err := backend.relay.checkTobTxsStateInterference(c.txs, common.TestLog)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
 			} else {
@@ -944,6 +974,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 				tracerError: "",
 				callTrace:   c.firstTobTxsTraces,
 			}
+			backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{tobSimulationError: nil}
 
 			// submit first set of tob txs
 			tobTxReqs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
@@ -1026,48 +1057,6 @@ func TestSubmitTobTxs(t *testing.T) {
 		slotDelta     uint64
 	}{
 		{
-			description: "No payout",
-			tobTxs: []*gethtypes.Transaction{
-				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    3,
-					GasPrice: big.NewInt(3),
-					Gas:      3,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(3),
-					Data:     []byte("tx6"),
-				}),
-			},
-			requiredError: "We require a payment tx along with the TOB txs!",
-			traces:        nil,
-			network:       common.EthNetworkCustom,
-			slotDelta:     1,
-		},
-		{
-			description: "payout to wrong address",
-			tobTxs: []*gethtypes.Transaction{
-				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    validWethDaiTx.Nonce(),
-					GasPrice: validWethDaiTx.GasPrice(),
-					Gas:      validWethDaiTx.Gas(),
-					To:       validWethDaiTx.To(),
-					Value:    validWethDaiTx.Value(),
-					Data:     validWethDaiTx.Data(),
-				}),
-				gethtypes.NewTx(&gethtypes.LegacyTx{
-					Nonce:    4,
-					GasPrice: big.NewInt(5),
-					Gas:      12,
-					To:       &uniswapV2Addr,
-					Value:    big.NewInt(5),
-					Data:     []byte(""),
-				}),
-			},
-			requiredError: "we require a payment tx to the proposer fee recipient along with the TOB txs",
-			traces:        nil,
-			network:       common.EthNetworkCustom,
-			slotDelta:     1,
-		},
-		{
 			description: "custom devnet ToB state interference",
 			tobTxs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
@@ -1141,14 +1130,6 @@ func TestSubmitTobTxs(t *testing.T) {
 			requiredError: "Slot's TOB bid not yet started!!",
 			network:       common.EthNetworkCustom,
 			slotDelta:     2,
-		},
-		{
-			description:   "No txs sent",
-			tobTxs:        []*gethtypes.Transaction{},
-			requiredError: "Empty TOB tx request sent",
-			network:       common.EthNetworkCustom,
-			slotDelta:     1,
-			traces:        nil,
 		},
 		{
 			description: "custom devnet Valid TobTxs sent",
@@ -1239,6 +1220,8 @@ func TestSubmitTobTxs(t *testing.T) {
 			} else {
 				backend.relay.tracer = &MockTracer{tracerError: "", callTrace: c.traces}
 			}
+
+			backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{tobSimulationError: nil}
 
 			tobTxReqs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
 			for _, tx := range c.tobTxs {
@@ -1535,6 +1518,8 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 
 			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
+			backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{tobSimulationError: nil}
+
 			backend.relay.tracer = &MockTracer{
 				tracerError: "",
 				callTrace:   c.firstTobTxsTraces,
@@ -1652,6 +1637,8 @@ func TestSubmitBuilderBlock(t *testing.T) {
 
 	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
 
+	backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{tobSimulationError: nil}
+
 	headSlotProposerFeeRecipient := common2.HexToAddress(backend.relay.proposerDutiesMap[headSlot+1].Entry.Message.FeeRecipient.String())
 
 	cases := []struct {
@@ -1728,6 +1715,8 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			submissionTimestamp := 1606824419
 
 			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
+
+			backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{tobSimulationError: nil}
 
 			if c.traces != nil {
 				backend.relay.tracer = &MockTracer{
