@@ -959,3 +959,46 @@ type CallTraceResponse struct {
 }
 
 type NetworkStateInterferenceChecker func(CallTrace) (bool, error)
+
+type TobValidationRequest struct {
+	TobTxs               utilbellatrix.ExecutionPayloadTransactions
+	ParentHash           string
+	ProposerFeeRecipient string
+}
+
+type IntermediateTobValidationRequest struct {
+	TobTxs               []byte `json:"tob_txs"`
+	ParentHash           string `json:"parent_hash"`
+	ProposerFeeRecipient string `json:"proposer_fee_recipient"`
+}
+
+func (t *TobValidationRequest) MarshalJson() ([]byte, error) {
+	sszedTobTxs, err := t.TobTxs.MarshalSSZ()
+	if err != nil {
+		return nil, err
+	}
+
+	intermediateStruct := IntermediateTobValidationRequest{
+		TobTxs:               sszedTobTxs,
+		ParentHash:           t.ParentHash,
+		ProposerFeeRecipient: t.ProposerFeeRecipient,
+	}
+
+	return json.Marshal(intermediateStruct)
+}
+
+func (t *TobValidationRequest) UnmarshalJson(data []byte) error {
+	var intermediateJson IntermediateTobValidationRequest
+	err := json.Unmarshal(data, &intermediateJson)
+	if err != nil {
+		return err
+	}
+
+	err = t.TobTxs.UnmarshalSSZ(intermediateJson.TobTxs)
+	if err != nil {
+		return err
+	}
+	t.ParentHash = intermediateJson.ParentHash
+
+	return nil
+}

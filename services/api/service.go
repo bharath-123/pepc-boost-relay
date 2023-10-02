@@ -165,6 +165,12 @@ type blockSimOptions struct {
 	req        *common.BuilderBlockValidationRequest
 }
 
+// Data needed to issue a block validation request.
+type tobSimOptions struct {
+	log *logrus.Entry
+	req *common.TobValidationRequest
+}
+
 type blockBuilderCacheEntry struct {
 	status     common.BuilderStatus
 	collateral *big.Int
@@ -786,6 +792,26 @@ func (api *RelayAPI) assembleBlock(ctx context.Context, opts blockAssemblyOption
 	}
 	log.Info("block assembly successful")
 	return res, nil, nil
+}
+
+// simulateTob sends a request for a TOB tx simulation to blockSimRateLimiter.
+func (api *RelayAPI) simulateTobTxs(ctx context.Context, opts tobSimOptions) error {
+	t := time.Now()
+	requestErr, validationErr := api.blockSimRateLimiter.TobSim(ctx, opts.req)
+	log := opts.log.WithFields(logrus.Fields{
+		"durationMs": time.Since(t).Milliseconds(),
+		"numWaiting": api.blockSimRateLimiter.CurrentCounter(),
+	})
+	if validationErr != nil {
+		log.WithError(validationErr).Warn("tob validation failed")
+		return validationErr
+	}
+	if requestErr != nil {
+		log.WithError(requestErr).Warn("tob validation failed: request error")
+		return requestErr
+	}
+	log.Info("tob validation successful")
+	return nil
 }
 
 // simulateBlock sends a request for a block simulation to blockSimRateLimiter.
@@ -1933,45 +1959,6 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 	return nil
 }
 
-// This method first checks whether the payouts are valid, then checks whether the txs are valid w.r.t state interference
-func (api *RelayAPI) checkTxAndSenderValidity(txs []*types.Transaction, slot uint64, log *logrus.Entry) error {
-	// TODO - Payouts need to be modelled more efficiently
-
-	api.proposerDutiesLock.RLock()
-	slotDuty, ok := api.proposerDutiesMap[slot]
-	api.proposerDutiesLock.RUnlock()
-	if !ok {
-		return fmt.Errorf("could not find slot duty")
-	}
-	validatorFeeRecipient := slotDuty.Entry.Message.FeeRecipient
-
-	if len(txs) == 0 {
-		return fmt.Errorf("Empty TOB tx request sent!")
-	}
-	if len(txs) == 1 {
-		return fmt.Errorf("We require a payment tx along with the TOB txs!")
-	}
-	if len(txs) > 2 {
-		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
-	}
-
-	// Start: Payout checks
-	lastTx := txs[len(txs)-1]
-
-	if lastTx.To() != nil && strings.ToLower(lastTx.To().String()) != validatorFeeRecipient.String() {
-		return fmt.Errorf("we require a payment tx to the proposer fee recipient along with the TOB txs")
-	}
-	if lastTx.Value().Cmp(big.NewInt(0)) == 0 {
-		return fmt.Errorf("the proposer payment tx is non-zero")
-	}
-	if len(lastTx.Data()) != 0 {
-		return fmt.Errorf("the proposer payment tx has malformed data")
-	}
-
-	// State interference checks
-	return api.checkTobTxsStateInterference(txs, log)
-}
-
 func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Request) {
 	headSlot := api.headSlot.Load()
 	receivedAt := time.Now().UTC()
@@ -2037,6 +2024,41 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
+	if len(tobTxRequest.TobTxs.Transactions) == 0 {
+		api.Respond(w, http.StatusBadRequest, "Empty TOB tx request sent!")
+	}
+	if len(tobTxRequest.TobTxs.Transactions) == 1 {
+		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
+	}
+	if len(tobTxRequest.TobTxs.Transactions) > 2 {
+		api.Respond(w, http.StatusBadRequest, "we support only 1 tx on the TOB currently, got %d")
+	}
+
+	api.proposerDutiesLock.RLock()
+	slotDuty, ok := api.proposerDutiesMap[slot]
+	api.proposerDutiesLock.RUnlock()
+	if !ok {
+		log.Error("could not find slot duty")
+		api.Respond(w, http.StatusBadRequest, "could not find slot duty")
+		return
+	}
+	validatorFeeRecipient := slotDuty.Entry.Message.FeeRecipient
+
+	// simulate the TOB txs
+	err = api.simulateTobTxs(context.Background(), tobSimOptions{
+		log: log,
+		req: &common.TobValidationRequest{
+			TobTxs:               tobTxRequest.TobTxs,
+			ParentHash:           tobTxRequest.ParentHash,
+			ProposerFeeRecipient: validatorFeeRecipient.String(),
+		},
+	})
+	if err != nil {
+		log.WithError(err).Warn("could not simulate TOB txs")
+		api.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// decode the txs
 	transactionBytes := make([][]byte, len(tobTxRequest.TobTxs.Transactions))
 	for i, txHexBytes := range tobTxRequest.TobTxs.Transactions {
@@ -2049,7 +2071,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	err = api.checkTxAndSenderValidity(txs, slot, log)
+	err = api.checkTobTxsStateInterference(txs, log)
 	if err != nil {
 		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
@@ -2074,9 +2096,6 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.Respond(w, http.StatusBadRequest, "TOB tx value is less than the current value!")
 		return
 	}
-
-	// TODO - bchain - simulate the txs on the parent block. If it fails, reject the txs.
-	// This is already solved and should be straightforward to implement. its basically tx simulation
 
 	// add the tob tx to the redis cache
 	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
