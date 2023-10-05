@@ -239,10 +239,10 @@ func TestStateInterference(t *testing.T) {
 			res, err := backend.relay.StateInterferenceChecks(c.callTraces)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, c.isTxCorrect, res)
+				return
 			}
+			require.NoError(t, err)
+			require.Equal(t, c.isTxCorrect, res)
 
 		})
 	}
@@ -343,10 +343,11 @@ func TestIsTraceEthUsdcSwap(t *testing.T) {
 			res, err := backend.relay.IsTraceUniV3EthUsdcSwap(c.callTrace)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, c.isTraceCorrect, res)
+				return
 			}
+			require.NoError(t, err)
+			require.Equal(t, c.isTraceCorrect, res)
+
 		})
 	}
 
@@ -406,10 +407,11 @@ func TestIsTraceToWEthDaiPair(t *testing.T) {
 			res, err := backend.relay.IsTraceToWEthDaiPair(c.callTrace)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, c.isTraceCorrect, res)
+				return
 			}
+			require.NoError(t, err)
+			require.Equal(t, c.isTraceCorrect, res)
+
 		})
 	}
 
@@ -560,7 +562,7 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 			requiredError:      "contract creation txs are not allowed",
 		},
 		{
-			description: "payout not addresses to relayer",
+			description: "payout not addressed to proposer",
 			txs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
@@ -617,9 +619,10 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 			if c.requiredError != "" {
 				require.Equal(t, http.StatusBadRequest, rr.Code)
 				require.Contains(t, rr.Body.String(), c.requiredError)
-			} else {
-				require.NoError(t, err)
+				return
 			}
+
+			require.NoError(t, err)
 		})
 	}
 }
@@ -758,9 +761,10 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 			err := backend.relay.checkTobTxsStateInterference(c.txs, common.TestLog)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
-			} else {
-				require.NoError(t, err)
+				return
 			}
+			require.NoError(t, err)
+
 		})
 	}
 }
@@ -1244,9 +1248,10 @@ func TestSubmitTobTxs(t *testing.T) {
 
 			if c.requiredError != "" {
 				require.Contains(t, rr.Body.String(), c.requiredError)
-			} else {
-				assertTobTxs(t, backend, headSlot+1, parentHash, c.tobTxs[len(c.tobTxs)-1].Value(), txHashRoot)
+				return
 			}
+			assertTobTxs(t, backend, headSlot+1, parentHash, c.tobTxs[len(c.tobTxs)-1].Value(), txHashRoot)
+
 		})
 	}
 }
@@ -1774,9 +1779,10 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			rr := backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			if c.requiredError != "" {
 				require.Contains(t, rr.Body.String(), c.requiredError)
-			} else {
-				require.Equal(t, http.StatusOK, rr.Code)
+				return
 			}
+			require.Equal(t, http.StatusOK, rr.Code)
+
 			// get the block stored in the db
 			assertBlock(t, backend, headSlot, parentHash, req, totalExpectedBidValue, c.tobTxs)
 		})
