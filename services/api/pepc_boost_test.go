@@ -560,7 +560,7 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 			requiredError:      "contract creation txs are not allowed",
 		},
 		{
-			description: "payout not addresses to relayer",
+			description: "payout not addressed to proposer",
 			txs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
