@@ -16,6 +16,8 @@ var Migration010CreateIncludedTobTxs = &migrate.Migration{
 
 			parent_hash varchar(66) NOT NULL,
 
+			block_hash varchar(66) NOT NULL,
+
 			tx_hash text NOT NULL
 		);
  	`,

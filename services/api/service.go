@@ -2335,8 +2335,6 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 		})
 	}
 
-	// TODO - if there are no ToB txs but we have encountered the highest bid, simulate the block instead of assembling it
-
 	var builderSubmission *common.BuilderSubmitBlockRequest
 	var eligibleAt time.Time // will be set once the bid is ready
 	if len(tobTxs) > 0 {
@@ -2356,6 +2354,24 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 					assembledPayload: nil,
 					requestErr:       nil,
 					validationErr:    nil,
+				}
+			}
+
+			// decode the txs
+			transactionBytes := make([][]byte, len(tobTxs))
+			for i, txHexBytes := range tobTxs {
+				transactionBytes[i] = txHexBytes[:]
+			}
+			txs, err := common.DecodeTransactions(transactionBytes)
+			if err != nil {
+				log.WithError(err).Warn("could not decode transactions")
+				return
+			}
+			for _, tx := range txs {
+				err := api.db.InsertIncludedTobTx(tx.Hash().String(), payload.Slot(), payload.ParentHash())
+				if err != nil {
+					log.WithError(err).Warn("could not insert included tob tx")
+					return
 				}
 			}
 

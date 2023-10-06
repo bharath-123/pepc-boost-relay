@@ -264,5 +264,7 @@ type IncludedTobTxEntry struct {
 
 	ParentHash string `db:"parent_hash"`
 
+	BlockHash string `db:"block_hash"`
+
 	TxHash string `db:"tx_hash"`
 }

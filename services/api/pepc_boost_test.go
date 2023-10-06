@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	uniswapV2Addr       = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+	randomAddr          = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
 	blockSubmitPath     = "/relay/v1/builder/blocks"
 	tobTxSubmitPath     = "/relay/v1/builder/tob_txs"
 	payloadJSONFilename = "../../testdata/submitBlockPayloadCapella_Goerli.json.gz"
@@ -306,7 +306,7 @@ func TestIsTraceEthUsdcSwap(t *testing.T) {
 	pairToDifferentAddress := new(common.CallTrace)
 	err = json.Unmarshal(ethUsdcTraceContents, pairToDifferentAddress)
 	// some random address
-	pairToDifferentAddress.To = &uniswapV2Addr
+	pairToDifferentAddress.To = &randomAddr
 
 	ethUsdcTraceDifferentMethod := new(common.CallTrace)
 	err = json.Unmarshal(ethUsdcTraceContents, ethUsdcTraceDifferentMethod)
@@ -370,7 +370,7 @@ func TestIsTraceToWEthDaiPair(t *testing.T) {
 	pairToDifferentAddress := new(common.CallTrace)
 	err = json.Unmarshal(wethDaiTraceContents, pairToDifferentAddress)
 	// some random address
-	pairToDifferentAddress.To = &uniswapV2Addr
+	pairToDifferentAddress.To = &randomAddr
 
 	wethDaiTraceDifferentMethod := new(common.CallTrace)
 	err = json.Unmarshal(wethDaiTraceContents, wethDaiTraceDifferentMethod)
@@ -496,7 +496,7 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Addr,
+					To:       &randomAddr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -520,7 +520,7 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Addr,
+					To:       &randomAddr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -568,7 +568,7 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Addr,
+					To:       &randomAddr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -1117,7 +1117,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &uniswapV2Addr,
+					To:       &randomAddr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx6"),
 				}),
