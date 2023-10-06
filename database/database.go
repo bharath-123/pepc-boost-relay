@@ -55,7 +55,7 @@ type IDatabaseService interface {
 	InsertTooLateGetPayload(slot uint64, proposerPubkey, blockHash string, slotStart, requestTime, decodeTime, msIntoSlot uint64) error
 
 	InsertIncludedTobTx(txHash string, slot uint64, parentHash string, blockHash string) error
-	GetIncludedTobTxsForGivenSlotAndParentHash(slot uint64, parentHash string, blockHash string) ([]*IncludedTobTxEntry, error)
+	GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash(slot uint64, parentHash string, blockHash string) ([]*IncludedTobTxEntry, error)
 }
 
 type DatabaseService struct {
@@ -637,7 +637,7 @@ func (s *DatabaseService) InsertIncludedTobTx(txHash string, slot uint64, parent
 	return err
 }
 
-func (s *DatabaseService) GetIncludedTobTxsForGivenSlotAndParentHash(slot uint64, parentHash string, blockHash string) (entries []*IncludedTobTxEntry, err error) {
+func (s *DatabaseService) GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash(slot uint64, parentHash string, blockHash string) (entries []*IncludedTobTxEntry, err error) {
 	query := `SELECT id, inserted_at, slot, parent_hash, block_hash, tx_hash FROM ` + vars.TableIncludedTobTxs + ` WHERE slot = $1 AND parent_hash = $2 AND block_hash = $3`
 	err = s.DB.Select(&entries, query, slot, parentHash, blockHash)
 	return entries, err

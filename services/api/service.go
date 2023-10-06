@@ -2368,7 +2368,7 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 				return
 			}
 			for _, tx := range txs {
-				err := api.db.InsertIncludedTobTx(tx.Hash().String(), payload.Slot(), payload.ParentHash())
+				err := api.db.InsertIncludedTobTx(tx.Hash().String(), payload.Slot(), payload.ParentHash(), payload.BlockHash())
 				if err != nil {
 					log.WithError(err).Warn("could not insert included tob tx")
 					return

@@ -135,7 +135,7 @@ func TestTobTxSubmitRequestJsonEncodingAndDecoding(t *testing.T) {
 
 func TestBlockAssemblerRequestJsonEncodingAndDecoding(t *testing.T) {
 	testAddr := common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
-	requestPayloadJSONBytes := LoadGzippedBytes(t, "../testdata/submitBlockPayloadCapella_Goerli.json.gz")
+	requestPayloadJSONBytes := LoadGzippedBytes(t, "../testdata/submitBlockPayloadCapella_Goerli2.json.gz")
 
 	blockSubmitRequest := new(BuilderSubmitBlockRequest)
 	err := json.Unmarshal(requestPayloadJSONBytes, &blockSubmitRequest)

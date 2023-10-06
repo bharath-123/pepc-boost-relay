@@ -455,7 +455,7 @@ func TestIncludedTobTxs(t *testing.T) {
 	require.NoError(t, err)
 
 	// get the included tx
-	entries, err := db.GetIncludedTobTxsForGivenSlotAndParentHash(slot, parentHash.String(), blockHash1.String())
+	entries, err := db.GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash(slot, parentHash.String(), blockHash1.String())
 	require.NoError(t, err)
 	require.Equal(t, len(entries), 1)
 	require.Equal(t, entries[0].ParentHash, parentHash.String())
@@ -469,7 +469,7 @@ func TestIncludedTobTxs(t *testing.T) {
 	require.NoError(t, err)
 
 	// get txs for the slot and parent hash
-	entries, err = db.GetIncludedTobTxsForGivenSlotAndParentHash(slot, parentHash.String(), blockHash1.String())
+	entries, err = db.GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash(slot, parentHash.String(), blockHash1.String())
 	require.NoError(t, err)
 	require.Equal(t, entries[1].ParentHash, parentHash.String())
 	require.Equal(t, entries[1].Slot, slot)
@@ -479,7 +479,7 @@ func TestIncludedTobTxs(t *testing.T) {
 
 	// slot not present
 	slot = uint64(54321)
-	entries, err = db.GetIncludedTobTxsForGivenSlotAndParentHash(slot, parentHash.String(), blockHash1.String())
+	entries, err = db.GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash(slot, parentHash.String(), blockHash1.String())
 	require.NoError(t, err)
 	require.Equal(t, len(entries), 0)
 

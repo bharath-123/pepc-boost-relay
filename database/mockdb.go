@@ -271,7 +271,7 @@ func (db MockDB) InsertIncludedTobTx(txHash string, slot uint64, parentHash stri
 	return nil
 }
 
-func (db MockDB) GetIncludedTobTxsForGivenSlotAndParentHash(slot uint64, parentHash string, blockHash string) (entries []*IncludedTobTxEntry, err error) {
+func (db MockDB) GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash(slot uint64, parentHash string, blockHash string) (entries []*IncludedTobTxEntry, err error) {
 	key := fmt.Sprintf("%d-%s-%s", slot, parentHash, blockHash)
 	entries, ok := db.IncludedTobTxs[key]
 	if !ok {
