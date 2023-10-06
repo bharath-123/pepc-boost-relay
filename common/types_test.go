@@ -116,6 +116,7 @@ func TestTobTxSubmitRequestJsonEncodingAndDecoding(t *testing.T) {
 	tobTxRequest := TobTxsSubmitRequest{
 		TobTxs:     txs,
 		Slot:       10,
+		TobSlotId:  0,
 		ParentHash: "0x0000000",
 	}
 
@@ -128,6 +129,7 @@ func TestTobTxSubmitRequestJsonEncodingAndDecoding(t *testing.T) {
 
 	require.Equal(t, tobTxRequest.Slot, decodedTobTxRequest.Slot)
 	require.Equal(t, tobTxRequest.ParentHash, decodedTobTxRequest.ParentHash)
+	require.Equal(t, tobTxRequest.TobSlotId, decodedTobTxRequest.TobSlotId)
 	decodedTxRoot, err := decodedTobTxRequest.TobTxs.HashTreeRoot()
 	require.NoError(t, err)
 	require.Equal(t, txRoot, decodedTxRoot)

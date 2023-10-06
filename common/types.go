@@ -843,12 +843,14 @@ func DecodeTransactions(enc [][]byte) ([]*types.Transaction, error) {
 type TobTxsSubmitRequest struct {
 	TobTxs     utilbellatrix.ExecutionPayloadTransactions
 	Slot       uint64
+	TobSlotId  uint64
 	ParentHash string
 }
 
 type IntermediateTobTxsSubmitRequest struct {
 	TobTxs     []byte `json:"tobTxs"`
 	Slot       uint64 `json:"slot"`
+	TobSlotId  uint64 `json:"tobSlotId"`
 	ParentHash string `json:"parentHash"`
 }
 
@@ -862,6 +864,7 @@ func (t *TobTxsSubmitRequest) MarshalJSON() ([]byte, error) {
 		TobTxs:     txBytes,
 		Slot:       t.Slot,
 		ParentHash: t.ParentHash,
+		TobSlotId:  t.TobSlotId,
 	})
 }
 
@@ -878,6 +881,7 @@ func (t *TobTxsSubmitRequest) UnmarshalJSON(data []byte) error {
 	}
 	t.Slot = intermediateJson.Slot
 	t.ParentHash = intermediateJson.ParentHash
+	t.TobSlotId = intermediateJson.TobSlotId
 
 	return nil
 }

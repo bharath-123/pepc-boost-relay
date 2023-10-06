@@ -12,7 +12,7 @@ import (
 )
 
 func TestSSZBuilderSubmission(t *testing.T) {
-	byteValue := LoadGzippedBytes(t, "../testdata/submitBlockPayloadCapella_Goerli2.json.gz")
+	byteValue := LoadGzippedBytes(t, "../testdata/submitBlockPayloadCapella_Goerli.json.gz")
 
 	depositData := new(capella.SubmitBlockRequest)
 	err := json.Unmarshal(byteValue, &depositData)
