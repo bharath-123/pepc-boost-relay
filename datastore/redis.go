@@ -153,12 +153,12 @@ func NewRedisCache(prefix, redisURI, readonlyURI string) (*RedisCache, error) {
 	}, nil
 }
 
-func (r *RedisCache) keyCacheGetTobTxs(slot uint64, parentHash string) string {
-	return fmt.Sprintf("%s:%d-%s", r.prefixTobTobTx, slot, parentHash)
+func (r *RedisCache) keyCacheGetTobTxs(slot uint64, parentHash string, tobSlotId uint64) string {
+	return fmt.Sprintf("%s:%d-%s-%d", r.prefixTobTobTx, slot, parentHash, tobSlotId)
 }
 
-func (r *RedisCache) keyCacheGetTobTxsValue(slot uint64, parentHash string) string {
-	return fmt.Sprintf("%s:%d-%s", r.prefixTopTobTxValue, slot, parentHash)
+func (r *RedisCache) keyCacheGetTobTxsValue(slot uint64, parentHash string, tobSlotId uint64) string {
+	return fmt.Sprintf("%s:%d-%s-%d", r.prefixTopTobTxValue, slot, parentHash, tobSlotId)
 }
 
 func (r *RedisCache) keyCacheGetHeaderResponse(slot uint64, parentHash, proposerPubkey string) string {
@@ -374,8 +374,8 @@ func (r *RedisCache) GetBestBid(slot uint64, parentHash, proposerPubkey string) 
 	return resp, err
 }
 
-func (r *RedisCache) SetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string, txs [][]byte) error {
-	key := r.keyCacheGetTobTxs(slot, parentHash)
+func (r *RedisCache) SetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string, tobSlotId uint64, txs [][]byte) error {
+	key := r.keyCacheGetTobTxs(slot, parentHash, tobSlotId)
 	finalTxStrings := []string{}
 	for _, tx := range txs {
 		finalTxStrings = append(finalTxStrings, hex.EncodeToString(tx))
@@ -390,8 +390,8 @@ func (r *RedisCache) SetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint
 	return err
 }
 
-func (r *RedisCache) GetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string) ([][]byte, error) {
-	key := r.keyCacheGetTobTxs(slot, parentHash)
+func (r *RedisCache) GetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string, tobSlotId uint64) ([][]byte, error) {
+	key := r.keyCacheGetTobTxs(slot, parentHash, tobSlotId)
 	resp := make([][]byte, 0)
 	c := tx.Get(ctx, key)
 	_, err := tx.Exec(ctx)
@@ -416,8 +416,8 @@ func (r *RedisCache) GetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint
 	return resp, err
 }
 
-func (r *RedisCache) SetTobTxValue(ctx context.Context, tx redis.Pipeliner, value *big.Int, slot uint64, parentHash string) (err error) {
-	key := r.keyCacheGetTobTxsValue(slot, parentHash)
+func (r *RedisCache) SetTobTxValue(ctx context.Context, tx redis.Pipeliner, value *big.Int, slot uint64, parentHash string, tobSlotId uint64) (err error) {
+	key := r.keyCacheGetTobTxsValue(slot, parentHash, tobSlotId)
 	err = tx.Set(ctx, key, value.String(), expiryBidCache).Err()
 	if err != nil {
 		return err
@@ -426,8 +426,8 @@ func (r *RedisCache) SetTobTxValue(ctx context.Context, tx redis.Pipeliner, valu
 	return err
 }
 
-func (r *RedisCache) GetTobTxValue(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string) (tobTxValue *big.Int, err error) {
-	keyTobTxValue := r.keyCacheGetTobTxsValue(slot, parentHash)
+func (r *RedisCache) GetTobTxValue(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string, tobSlotId uint64) (tobTxValue *big.Int, err error) {
+	keyTobTxValue := r.keyCacheGetTobTxsValue(slot, parentHash, tobSlotId)
 	c := tx.Get(ctx, keyTobTxValue)
 	_, err = tx.Exec(ctx)
 	if errors.Is(err, redis.Nil) {

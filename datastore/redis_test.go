@@ -519,7 +519,7 @@ func TestSetTobTxs(t *testing.T) {
 
 	// Get the TOB txs
 	_, err := cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
-		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash)
+		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash, 0)
 		require.NoError(t, err)
 		require.Equal(t, b, [][]byte{})
 		return nil
@@ -554,14 +554,18 @@ func TestSetTobTxs(t *testing.T) {
 	}
 
 	_, err = cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
-		return cache.SetTobTx(context.Background(), tx, slot, parentHash, txs.Transactions)
+		return cache.SetTobTx(context.Background(), tx, slot, parentHash, 0, txs.Transactions)
 	})
 	require.NoError(t, err)
 
 	_, err = cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
-		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash)
+		b, err := cache.GetTobTx(context.Background(), tx, slot, parentHash, 0)
 		require.NoError(t, err)
 		require.Equal(t, b, txs.Transactions)
+		b, err = cache.GetTobTx(context.Background(), tx, slot, parentHash, 1)
+		require.NoError(t, err)
+		require.Equal(t, b, [][]byte{})
+
 		return nil
 	})
 }
@@ -575,15 +579,27 @@ func TestSetTobTxValue(t *testing.T) {
 	// Set a value
 	value := big.NewInt(123)
 	_, err := cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
-		v, err := cache.GetTobTxValue(context.Background(), tx, slot, parentHash)
+		v, err := cache.GetTobTxValue(context.Background(), tx, slot, parentHash, 0)
 		require.NoError(t, err)
 		require.Equal(t, v, big.NewInt(0))
 
-		err = cache.SetTobTxValue(context.Background(), tx, value, slot, parentHash)
+		err = cache.SetTobTxValue(context.Background(), tx, value, slot, parentHash, 0)
 		require.NoError(t, err)
 
 		// Get the value back
-		v, err = cache.GetTobTxValue(context.Background(), tx, slot, parentHash)
+		v, err = cache.GetTobTxValue(context.Background(), tx, slot, parentHash, 0)
+		require.NoError(t, err)
+		require.Equal(t, v, big.NewInt(123))
+
+		v, err = cache.GetTobTxValue(context.Background(), tx, slot, parentHash, 1)
+		require.NoError(t, err)
+		require.Equal(t, v, big.NewInt(0))
+
+		err = cache.SetTobTxValue(context.Background(), tx, value, slot, parentHash, 1)
+		require.NoError(t, err)
+
+		// Get the value back
+		v, err = cache.GetTobTxValue(context.Background(), tx, slot, parentHash, 1)
 		require.NoError(t, err)
 		require.Equal(t, v, big.NewInt(123))
 
