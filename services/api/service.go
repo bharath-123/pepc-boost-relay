@@ -81,6 +81,7 @@ var (
 	pathDataProposerPayloadDelivered = "/relay/v1/data/bidtraces/proposer_payload_delivered"
 	pathDataBuilderBidsReceived      = "/relay/v1/data/bidtraces/builder_blocks_received"
 	pathDataValidatorRegistration    = "/relay/v1/data/validator_registration"
+	pathIncludedTobTxs               = "/relay/v1/data/included_tob_txs"
 
 	// Internal API
 	pathInternalBuilderStatus     = "/internal/v1/builder/{pubkey:0x[a-fA-F0-9]+}"
@@ -430,6 +431,7 @@ func (api *RelayAPI) getRouter() http.Handler {
 		r.HandleFunc(pathDataProposerPayloadDelivered, api.handleDataProposerPayloadDelivered).Methods(http.MethodGet)
 		r.HandleFunc(pathDataBuilderBidsReceived, api.handleDataBuilderBidsReceived).Methods(http.MethodGet)
 		r.HandleFunc(pathDataValidatorRegistration, api.handleDataValidatorRegistration).Methods(http.MethodGet)
+		r.HandleFunc(pathIncludedTobTxs, api.handleIncludedTobTxs).Methods(http.MethodGet)
 	}
 
 	// Pprof
@@ -1135,18 +1137,9 @@ func (api *RelayAPI) handleGetSlot(w http.ResponseWriter, req *http.Request) {
 
 func (api *RelayAPI) handleGetParentHashForSlot(w http.ResponseWriter, req *http.Request) {
 	// slot is passed as url args
-	userAgent := req.UserAgent()
 	slotStr := mux.Vars(req)["slot"]
 	slot, err := strconv.ParseUint(slotStr, 10, 64)
-	log := api.log.WithFields(logrus.Fields{
-		"method":        "registerValidator",
-		"ua":            userAgent,
-		"mevBoostV":     common.GetMevBoostVersionFromUserAgent(userAgent),
-		"headSlot":      api.headSlot.Load(),
-		"contentLength": req.ContentLength,
-	})
 	if err != nil {
-		log.Info("DEBUG: Invalid slot", "slot", slotStr, "err", err.Error())
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 	}
 
@@ -1161,18 +1154,9 @@ func (api *RelayAPI) handleGetParentHashForSlot(w http.ResponseWriter, req *http
 
 func (api *RelayAPI) handleGetProposerForSlot(w http.ResponseWriter, req *http.Request) {
 	// slot is passed as url args
-	userAgent := req.UserAgent()
 	slotStr := mux.Vars(req)["slot"]
 	slot, err := strconv.ParseUint(slotStr, 10, 64)
-	log := api.log.WithFields(logrus.Fields{
-		"method":        "registerValidator",
-		"ua":            userAgent,
-		"mevBoostV":     common.GetMevBoostVersionFromUserAgent(userAgent),
-		"headSlot":      api.headSlot.Load(),
-		"contentLength": req.ContentLength,
-	})
 	if err != nil {
-		log.Info("DEBUG: Invalid slot", "slot", slotStr, "err", err.Error())
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 	}
 
@@ -2857,6 +2841,35 @@ func (api *RelayAPI) handleDataBuilderBidsReceived(w http.ResponseWriter, req *h
 	}
 
 	api.RespondOK(w, response)
+}
+
+func (api *RelayAPI) handleIncludedTobTxs(w http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+	slotStr := vars["slot"]
+	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	if err != nil {
+		api.RespondError(w, http.StatusBadRequest, "invalid slot")
+		return
+	}
+	parentHash := vars["parent_hash"]
+	blockHash := vars["block_hash"]
+	if parentHash == "" {
+		api.RespondError(w, http.StatusBadRequest, "invalid parent_hash")
+		return
+	}
+	if blockHash == "" {
+		api.RespondError(w, http.StatusBadRequest, "invalid block_hash")
+		return
+	}
+
+	tobTxs, err := api.db.GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash(slot, parentHash, blockHash)
+	if err != nil {
+		api.log.WithError(err).Error("error getting included tob txs")
+		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	api.RespondOK(w, tobTxs)
 }
 
 func (api *RelayAPI) handleDataValidatorRegistration(w http.ResponseWriter, req *http.Request) {
