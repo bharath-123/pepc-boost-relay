@@ -16,12 +16,11 @@ var Migration010CreateIncludedTobTxs = &migrate.Migration{
 
 			parent_hash varchar(66) NOT NULL,
 
-			tx_hash text NOT NULL,
+			tx_hash text NOT NULL
 		);
-
-		CREATE UNIQUE INDEX IF NOT EXISTS ` + vars.TableIncludedTobTxs + `slot_parent_hash ON ` + vars.TableIncludedTobTxs + `(slot, parent_hash);
-	`, `
-	`},
+ 	`,
+		``,
+	},
 	Down: []string{},
 
 	DisableTransactionUp:   true,

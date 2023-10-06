@@ -3,7 +3,6 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	consensuscapella "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	common2 "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
@@ -32,7 +32,8 @@ const (
 )
 
 var (
-	runDBTests   = os.Getenv("RUN_DB_TESTS") == "1" //|| true
+	//runDBTests   = os.Getenv("RUN_DB_TESTS") == "1" //|| true
+	runDBTests   = true
 	feeRecipient = bellatrix.ExecutionAddress{0x02}
 	blockHashStr = "0xa645370cc112c2e8e3cce121416c7dc849e773506d4b6fb9b752ada711355369"
 	testDBDSN    = common.GetEnv("TEST_DB_DSN", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable")
@@ -439,4 +440,44 @@ func TestUpsertTooLateGetPayload(t *testing.T) {
 	require.Equal(t, 2, len(entries))
 	entry = entries[1]
 	require.Equal(t, hash2, entry.BlockHash)
+}
+
+func TestIncludedTobTxs(t *testing.T) {
+	db := resetDatabase(t)
+
+	// insert one included tx
+	slot := uint64(12345)
+	parentHash := common2.HexToHash("0xad39ea469b48da684a52b00df333d8b9062aabc1a62742154b6af1a3c4b77369")
+	txHash1 := common2.HexToHash("0x5488c797fa93bc631b0183d6e4641aa4963df50e7b8e9b82b8ec09fd5851dd33")
+
+	err := db.InsertIncludedTobTx(txHash1.String(), slot, parentHash.String())
+	require.NoError(t, err)
+
+	// get the included tx
+	entries, err := db.GetIncludedTobTxsForGivenSlotAndParentHash(slot, parentHash.String())
+	require.NoError(t, err)
+	require.Equal(t, len(entries), 1)
+	require.Equal(t, entries[0].ParentHash, parentHash.String())
+	require.Equal(t, entries[0].Slot, slot)
+	require.Equal(t, entries[0].TxHash, txHash1.String())
+
+	// add another tx for the same slot and parent hash
+	txHash2 := common2.HexToHash("0x167481edfb0faa62b596498c1efea399e1e2f06b2d032b552371b3f5627a327d")
+	err = db.InsertIncludedTobTx(txHash2.String(), slot, parentHash.String())
+	require.NoError(t, err)
+
+	// get txs for the slot and parent hash
+	entries, err = db.GetIncludedTobTxsForGivenSlotAndParentHash(slot, parentHash.String())
+	require.NoError(t, err)
+	require.Equal(t, entries[1].ParentHash, parentHash.String())
+	require.Equal(t, entries[1].Slot, slot)
+	require.Equal(t, entries[1].TxHash, txHash2.String())
+	require.Equal(t, len(entries), 2)
+
+	// slot not present
+	slot = uint64(54321)
+	entries, err = db.GetIncludedTobTxsForGivenSlotAndParentHash(slot, parentHash.String())
+	require.NoError(t, err)
+	require.Equal(t, len(entries), 0)
+
 }

@@ -255,3 +255,14 @@ type TooLateGetPayloadEntry struct {
 	BlockHash      string `db:"block_hash"`
 	MsIntoSlot     uint64 `db:"ms_into_slot"`
 }
+
+type IncludedTobTxEntry struct {
+	ID         int64     `db:"id"`
+	InsertedAt time.Time `db:"inserted_at"`
+
+	Slot uint64 `db:"slot"`
+
+	ParentHash string `db:"parent_hash"`
+
+	TxHash string `db:"tx_hash"`
+}

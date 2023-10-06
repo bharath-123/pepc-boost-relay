@@ -15,6 +15,7 @@ type MockDB struct {
 	Builders         map[string]*BlockBuilderEntry
 	Demotions        map[string]bool
 	Refunds          map[string]bool
+	IncludedTobTxs   map[string]*IncludedTobTxEntry
 }
 
 func (db MockDB) NumRegisteredValidators() (count uint64, err error) {
@@ -256,4 +257,25 @@ func (db MockDB) GetTooLateGetPayload(slot uint64) (entries []*TooLateGetPayload
 
 func (db MockDB) InsertTooLateGetPayload(slot uint64, proposerPubkey, blockHash string, slotStart, requestTime, decodeTime, msIntoSlot uint64) error {
 	return nil
+}
+
+func (db MockDB) InsertIncludedTobTx(txHash string, slot uint64, parentHash string) error {
+	key := fmt.Sprintf("%d-%s", slot, parentHash)
+	db.IncludedTobTxs[key] = &IncludedTobTxEntry{
+		TxHash:     txHash,
+		Slot:       slot,
+		ParentHash: parentHash,
+	}
+
+	return nil
+}
+
+func (db MockDB) GetIncludedTobTxsForGivenSlotAndParentHash(slot uint64, parentHash string) (entries []*IncludedTobTxEntry, err error) {
+	key := fmt.Sprintf("%d-%s", slot, parentHash)
+	entry, ok := db.IncludedTobTxs[key]
+	if !ok {
+		return nil, fmt.Errorf(sql.ErrNoRows.Error())
+	}
+
+	return []*IncludedTobTxEntry{entry}, nil
 }
