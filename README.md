@@ -1,31 +1,16 @@
-# MEV-Boost Relay
 
-[![Goreport status](https://goreportcard.com/badge/github.com/flashbots/mev-boost-relay)](https://goreportcard.com/report/github.com/flashbots/mev-boost-relay)
-[![Test status](https://github.com/flashbots/mev-boost-relay/workflows/Checks/badge.svg)](https://github.com/flashbots/mev-boost-relay/actions?query=workflow%3A%22Checks%22)
-[![Docker hub](https://badgen.net/docker/size/flashbots/mev-boost-relay?icon=docker&label=image)](https://hub.docker.com/r/flashbots/mev-boost-relay/tags)
+# PEPC-Boost Relay
 
-MEV-Boost Relay for Ethereum proposer/builder separation (PBS).
+A prototype for an out-of-protocol PEPC-type block allocation mechanism (PBS).
 
-Currently live at:
-
-* [boost-relay.flashbots.net](https://boost-relay.flashbots.net) (also on [Goerli](https://boost-relay-goerli.flashbots.net) and [Sepolia](https://boost-relay-sepolia.flashbots.net))
-* [relay.ultrasound.money](https://relay.ultrasound.money), [agnostic-relay.net](https://agnostic-relay.net), bloXroute relays ([light fork](https://github.com/bloXroute-Labs/mev-relay))
-* [mainnet.aestus.live](https://mainnet.aestus.live), [relay.edennetwork.io/info](https://relay.edennetwork.io/info), [mainnet-relay.securerpc.com](https://mainnet-relay.securerpc.com)
-
-Alternatives (not audited or endorsed): [blocknative/dreamboat](https://github.com/blocknative/dreamboat), [manifold/mev-freelay](https://github.com/manifoldfinance/mev-freelay)
+Currently in works! Please use it with caution!
 
 ### See also
-
-* [Docker images](https://hub.docker.com/r/flashbots/mev-boost-relay)
-* [mev-boost](https://github.com/flashbots/mev-boost)
-* [Relay API specs](https://flashbots.github.io/relay-specs)
-* [Guide for running mev-boost-relay at scale](https://flashbots.notion.site/Running-mev-boost-relay-at-scale-draft-4040ccd5186c425d9a860cbb29bbfe09)
-* [Running relay and builders in custom devnets](https://gist.github.com/metachris/66df812f2920e6b0047afb9fdaf7df91#using-unnamed-devnets)
-* [More docs](/docs/docs/)
+* [pepc-boost-docs](https://github.com/bharath-123/pepc-boost-docs)
 
 ### Components
 
-The relay consists of three main components, which are designed to run and scale independently, and to be as simple as possible:
+The relay consists of three main components, which are designed to run and scale independently and to be as simple as possible:
 
 1. [API](https://github.com/flashbots/mev-boost-relay/tree/main/services/api): Services that provide APIs for (a) proposers, (b) block builders, (c) data.
 1. [Website](https://github.com/flashbots/mev-boost-relay/tree/main/services/website): Serving the [website requests](https://boost-relay.flashbots.net/) (information is pulled from Redis and database).
@@ -54,28 +39,18 @@ The relay consists of three main components, which are designed to run and scale
 * The reason is that on getPayload, the block has to be validated and broadcast by a local beacon node before it is returned to the proposer.
 * If the local beacon nodes don't accept it (i.e. because it's down), the block won't be returned to the proposer, which leads to the proposer missing the slot.
 * The relay makes the validate+broadcast request to all beacon nodes concurrently, and returns as soon as the first request is successful.
-
-### Security
-
-A security assessment for the relay was conducted on 2022-08-22 by [lotusbumi](https://github.com/lotusbumi). Additional information can be found in the [Security](#security) section of this repository.
-
-If you find a security vulnerability on this project or any other initiative related to Flashbots, please let us know sending an email to security@flashbots.net.
-
 ---
 
 # Background
 
-MEV is a centralizing force on Ethereum. Unattended, the competition for MEV opportunities leads to consensus security instability and permissioned communication infrastructure between traders and block producers. This erodes neutrality, transparency, decentralization, and permissionlessness.
 
-Flashbots is a research and development organization working on mitigating the negative externalities of MEV. Flashbots started as a builder specializing in MEV extraction in proof-of-work Ethereum to democratize access to MEV and make the most profitable blocks available to all miners. >90% of miners are outsourcing some of their block construction to Flashbots today.
+[PEPC](https://ethresear.ch/t/unbundling-pbs-towards-protocol-enforced-proposer-commitments-pepc/13879?u=barnabe) as proposed by Barnabe Monnot in is an intended protocol mechanism to allow proposers to enter into commitments over the blocks they build. Some examples of possible commitments are commitments to certain types of transaction ordering, parallel block building, etc.
 
-The mev-boost relay is a trusted mediator between block producers and block builders. It enables all Ethereum proof-of-stake validators to offer their blockspace to not just Flashbots but other builders as well. This opens up the market to more builders and creates competition between them, leading to more revenue and choice for validators, and better censorship-resistance for Ethereum.
+One of the reasons [why PEPC is useful](https://efdn.notion.site/PEPC-FAQ-0787ba2f77e14efba771ff2d903d67e4?pvs=25#b5d2966c2215482eaba942f93bdfb613) is that it allows more general block allocation mechanisms in the protocol which removes certain locked outcomes which may be sub-optimal by enshrining certain fixed block allocation mechanisms in the protocol.
 
-In the future, [proposer/builder separation](https://ethresear.ch/t/two-slot-proposer-builder-separation/10980) will be enshrined in the Ethereum protocol itself to further harden its trust model.
+[PEPC-Boost](https://efdn.notion.site/PEPC-FAQ-0787ba2f77e14efba771ff2d903d67e4#2dfe02bc6dcd48878c82647676ca8d68%29) is a proposed out-of-protocol implementation of a certain PEPC-type allocation which splits a block into a top-of-block slot and rest-of-block slot. Separate auctions fill each of these slots. PEPC-Boost intends to separate [CEX-DEX arbitrages from the rest of the block](https://arxiv.org/abs/2305.19150) by unbundling the block auction into two separate lanes, which are the top-of-block slot and rest-of-block slot which increases the competitivity and decentralization in the block building ecosystem. Integrated builder-searchers like HFTS are likelier to win the PBS auctions because they can maintain private order flows and have access to centralized exchange feeds, giving them superior top-of-block capabilities which enable them to extract much more profit than non-integrated builders and win the PBS block auctions.
 
-Read more in [Why run mev-boost?](https://writings.flashbots.net/writings/why-run-mevboost/) and in the [Frequently Asked Questions](https://github.com/flashbots/mev-boost/wiki/Frequently-Asked-Questions).
-
----
+PEPC-Boost also opens up the proposer block space by allowing different actors to construct segments of the whole block. Searchers can engage in an auction to bid for transactions they want to include in the top-of-block for a given slot. Builders can engage in an auction to bid for transactions they wish to have in the rest-of-block for a given slot, a form of a parallel block auction.
 
 # Usage
 
@@ -196,9 +171,9 @@ To enable memcached, you just need to supply the memcached URIs either via envir
 You can disable storing the execution payloads in the database with this environment variable:
 `DISABLE_PAYLOAD_DATABASE_STORAGE=1`.
 
-## Builder submission validation nodes
+## Builder nodes RPC
 
-You can use the [builder project](https://github.com/flashbots/builder) to validate block builder submissions: https://github.com/flashbots/builder
+You can use the [pepc-boost-builder project](https://github.com/bharath-123/pepc-boost-builder) to validate tob tx submissions, block builder submissions and to assemble tob and rob txs: https://github.com/bharath-123/pepc-boost-builder
 
 Here's an example systemd config:
 
@@ -353,38 +328,5 @@ WantedBy=default.target
 
 ## Bid Cancellations
 
-Block builders can opt into cancellations by submitting blocks to `/relay/v1/builder/blocks?cancellations=1`. This may incur a performance penalty (i.e. validation of submissions taking significantly longer). See also https://github.com/flashbots/mev-boost-relay/issues/348
+Cancellations are not yet supported in PEPC-Boost
 
----
-
-# Maintainers
-
-- [@metachris](https://twitter.com/metachris)
-- [@Ruteri](https://twitter.com/mmrosum)
-- [@avalonche](https://github.com/avalonche)
-
-# Contributing
-
-[Flashbots](https://flashbots.net) is a research and development collective working on mitigating the negative externalities of decentralized economies. We contribute with the larger free software community to illuminate the dark forest.
-
-You are welcome here <3.
-
-- If you have a question, feedback or a bug report for this project, please [open a new Issue](https://github.com/flashbots/mev-boost/issues).
-- If you would like to contribute with code, check the [CONTRIBUTING file](CONTRIBUTING.md) for further info about the development environment.
-- We just ask you to be nice. Read our [code of conduct](CODE_OF_CONDUCT.md).
-
-# Security
-
-If you find a security vulnerability on this project or any other initiative related to Flashbots, please let us know sending an email to security@flashbots.net.
-
-## Audits
-
-- [20220822](docs/audit-20220822.md), by [lotusbumi](https://github.com/lotusbumi).
-
-# License
-
-The code in this project is free software under the [AGPL License version 3 or later](LICENSE).
-
----
-
-Made with ☀️ by the ⚡🤖 collective.
