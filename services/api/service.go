@@ -81,7 +81,7 @@ var (
 	pathDataProposerPayloadDelivered = "/relay/v1/data/bidtraces/proposer_payload_delivered"
 	pathDataBuilderBidsReceived      = "/relay/v1/data/bidtraces/builder_blocks_received"
 	pathDataValidatorRegistration    = "/relay/v1/data/validator_registration"
-	pathIncludedTobTxs               = "/relay/v1/data/included_tob_txs"
+	pathIncludedTobTxs               = "/relay/v1/data/included_tob_txs/{slot:[0-9]+}/{parent_hash:0x[a-fA-F0-9]+}/{block_hash:0x[a-fA-F0-9]+}"
 
 	// Internal API
 	pathInternalBuilderStatus     = "/internal/v1/builder/{pubkey:0x[a-fA-F0-9]+}"
