@@ -631,8 +631,7 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 	}
 }
 
-// TODO - come up with better name? state interference is not really descriptive name
-func (api *RelayAPI) StateInterferenceChecks(trace *common.CallTrace) (bool, error) {
+func (api *RelayAPI) TobTxInspection(trace *common.CallTrace) (bool, error) {
 	if api.opts.EthNetDetails.Name == common.EthNetworkCustom {
 		return api.TraceChecker(trace, api.IsTraceToWEthDaiPair)
 	} else if api.opts.EthNetDetails.Name == common.EthNetworkGoerli {
@@ -1912,7 +1911,7 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 }
 
 // Checks the quality of the TOB txs, if it is the txs expected in a TOB
-func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log *logrus.Entry) error {
+func (api *RelayAPI) checkTobTxsType(txs []*types.Transaction, log *logrus.Entry) error {
 	if len(txs) > 2 {
 		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
 	}
@@ -1932,7 +1931,10 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 		return fmt.Errorf("failed to get traces: %s", err.Error())
 	}
 
-	res, err := api.StateInterferenceChecks(&txTraces.Result)
+	// TODO - currently we only support 1 type of tx for all ToB slots. This will change in the future where we will
+	// have to allow multiple type of txs on the ToB slots. At that point, we will require custom validation functions
+	// for each TobSlotId.
+	res, err := api.TobTxInspection(&txTraces.Result)
 	if err != nil {
 		return fmt.Errorf("state interference checks failed with: %s", err.Error())
 	}
@@ -1989,6 +1991,13 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 
 	slot := tobTxRequest.Slot
 	parentHash := tobTxRequest.ParentHash
+	tobSlotId := tobTxRequest.TobSlotId
+	if tobSlotId >= common.MaxTobSlots {
+		log.Errorf("we currently only support a maximum of %d slots!", common.MaxTobSlots)
+		api.Respond(w, http.StatusBadRequest, fmt.Sprintf("we currently only support a maximum of %d slots!", common.MaxTobSlots))
+		return
+	}
+
 	if len(tobTxRequest.TobTxs.Transactions) == 0 {
 		log.Error("Empty TOB tx request sent!")
 		api.Respond(w, http.StatusBadRequest, "Empty TOB tx request sent!")
@@ -2055,7 +2064,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	err = api.checkTobTxsStateInterference(txs, log)
+	err = api.checkTobTxsType(txs, log)
 	if err != nil {
 		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
@@ -2068,7 +2077,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 
 	tobTxValue := lastTx.Value()
 	// store it in a redis cache. The ROB block will pick it up and assemble it along with its own txs
-	currentTobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, slot, parentHash)
+	currentTobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, slot, parentHash, tobSlotId)
 	if err != nil {
 		log.WithError(err).Warn("could not get current Tob Tx value")
 		api.RespondError(w, http.StatusInternalServerError, err.Error())
@@ -2082,14 +2091,14 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	}
 
 	// add the tob tx to the redis cache
-	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, transactionBytes)
+	err = api.redis.SetTobTx(context.Background(), tx, slot, parentHash, tobSlotId, transactionBytes)
 	if err != nil {
 		log.WithError(err).Warn("could not set Tob Tx")
 		api.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// set the tob tx value in the redis cache
-	err = api.redis.SetTobTxValue(context.Background(), tx, tobTxValue, slot, parentHash)
+	err = api.redis.SetTobTxValue(context.Background(), tx, tobTxValue, slot, parentHash, tobSlotId)
 	if err != nil {
 		log.WithError(err).Warn("could not set Tob Tx Value")
 		api.RespondError(w, http.StatusInternalServerError, err.Error())
@@ -2284,25 +2293,29 @@ func (api *RelayAPI) handleSubmitNewBlock(w http.ResponseWriter, req *http.Reque
 	// Get the best TOB tx value set from Redis
 	// If so proceed with assembly.
 	// check if there is a TOB tx
-	tobTxs, err := api.redis.GetTobTx(context.Background(), tx, payload.Slot(), payload.ParentHash())
-	if err != nil {
-		log.WithError(err).Error("failed to get tob txs from redis")
-		api.RespondError(w, http.StatusInternalServerError, "failed to get tob txs from redis")
-		return
-	}
-	// if there are no TOB txs then the ROB block is the final block
-	totalBidValue := payload.Value()
-	tobTxValue := big.NewInt(0)
-	if len(tobTxs) > 0 {
-		tobTxValue, err = api.redis.GetTobTxValue(context.Background(), tx, payload.Slot(), payload.ParentHash())
+	totalTobValue := big.NewInt(0)
+	tobTxs := make([][]byte, 0)
+	for i := uint64(0); i < common.MaxTobSlots; i++ {
+		tobTxValue, err := api.redis.GetTobTxValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), i)
 		if err != nil {
 			log.WithError(err).Error("failed to get tob tx value from redis")
 			api.RespondError(w, http.StatusInternalServerError, "failed to get tob tx value from redis")
 			return
 		}
+		totalTobValue = new(big.Int).Add(totalTobValue, tobTxValue)
 
-		totalBidValue = new(big.Int).Add(payload.Value(), tobTxValue)
+		tobTx, err := api.redis.GetTobTx(context.Background(), tx, payload.Slot(), payload.ParentHash(), i)
+		if err != nil {
+			log.WithError(err).Error("failed to get tob tx from redis")
+			api.RespondError(w, http.StatusInternalServerError, "failed to get tob tx from redis")
+			return
+		}
+		if len(tobTx) > 0 {
+			tobTxs = append(tobTxs, tobTx...)
+		}
 	}
+
+	totalBidValue := new(big.Int).Add(payload.Value(), totalTobValue)
 
 	// Get the latest top bid value from Redis
 	bidIsTopBid := false

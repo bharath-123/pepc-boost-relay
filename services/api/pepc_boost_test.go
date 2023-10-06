@@ -88,12 +88,12 @@ func prepareBlockSubmitRequest(t *testing.T, payloadJSONFilename string, submiss
 	return req
 }
 
-func assertTobTxs(t *testing.T, backend *testBackend, slot uint64, parentHash string, tobTxValue *big.Int, txHashRoot [32]byte) {
-	tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), slot, parentHash)
+func assertTobTxs(t *testing.T, backend *testBackend, slot uint64, parentHash string, tobSlotId uint64, tobTxValue *big.Int, txHashRoot [32]byte) {
+	tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), slot, parentHash, tobSlotId)
 	require.NoError(t, err)
 	require.Equal(t, tobTxValue, tobTxValue)
 
-	tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), slot, parentHash)
+	tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), slot, parentHash, tobSlotId)
 	require.NoError(t, err)
 
 	require.Equal(t, 2, len(tobtxs))
@@ -236,7 +236,7 @@ func TestStateInterference(t *testing.T) {
 
 			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
-			res, err := backend.relay.StateInterferenceChecks(c.callTraces)
+			res, err := backend.relay.TobTxInspection(c.callTraces)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
 				return
@@ -758,7 +758,7 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 
 			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
-			err := backend.relay.checkTobTxsStateInterference(c.txs, common.TestLog)
+			err := backend.relay.checkTobTxsType(c.txs, common.TestLog)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
 				return
@@ -993,6 +993,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 				ParentHash: parentHash,
 				TobTxs:     tobTxReqs,
 				Slot:       headSlot + 1,
+				TobSlotId:  0,
 			}
 			jsonReq, err := req.MarshalJSON()
 			require.NoError(t, err)
@@ -1002,7 +1003,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, rr.Code)
 			// first checks should check for the first set of tob txs
-			assertTobTxs(t, backend, headSlot+1, parentHash, c.firstTobTxs[len(c.firstTobTxs)-1].Value(), firstSetTxHashRoot)
+			assertTobTxs(t, backend, headSlot+1, parentHash, 0, c.firstTobTxs[len(c.firstTobTxs)-1].Value(), firstSetTxHashRoot)
 
 			// submit second set of txs
 			backend.relay.tracer = &MockTracer{
@@ -1033,7 +1034,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 				require.Contains(t, rr.Body.String(), "TOB tx value is less than the current value!")
 			} else {
 				// the tob txs should be the second set
-				assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), secondSetTxHashRoot)
+				assertTobTxs(t, backend, headSlot+1, parentHash, 0, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), secondSetTxHashRoot)
 			}
 		})
 	}
@@ -1239,6 +1240,7 @@ func TestSubmitTobTxs(t *testing.T) {
 				ParentHash: parentHash,
 				TobTxs:     tobTxReqs,
 				Slot:       headSlot + c.slotDelta,
+				TobSlotId:  0,
 			}
 			jsonReq, err := req.MarshalJSON()
 			require.NoError(t, err)
@@ -1250,7 +1252,7 @@ func TestSubmitTobTxs(t *testing.T) {
 				require.Contains(t, rr.Body.String(), c.requiredError)
 				return
 			}
-			assertTobTxs(t, backend, headSlot+1, parentHash, c.tobTxs[len(c.tobTxs)-1].Value(), txHashRoot)
+			assertTobTxs(t, backend, headSlot+1, parentHash, 0, c.tobTxs[len(c.tobTxs)-1].Value(), txHashRoot)
 
 		})
 	}
@@ -1547,6 +1549,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 				ParentHash: parentHash,
 				TobTxs:     txs,
 				Slot:       headSlot + 1,
+				TobSlotId:  0,
 			}
 			jsonReq, err := req.MarshalJSON()
 			require.NoError(t, err)
@@ -1559,7 +1562,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			payoutTxs := c.firstTobTxs[len(c.firstTobTxs)-1]
 			tobTxsValue := payoutTxs.Value()
 
-			assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot)
+			assertTobTxs(t, backend, headSlot+1, parentHash, 0, tobTxsValue, txsHashRoot)
 
 			// Prepare the request payload
 			blockSubmitReq := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
@@ -1595,6 +1598,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 				ParentHash: parentHash,
 				TobTxs:     txs,
 				Slot:       headSlot + 1,
+				TobSlotId:  0,
 			}
 			jsonReq, err = req.MarshalJSON()
 			require.NoError(t, err)
@@ -1614,7 +1618,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			payoutTxs = c.secondTobTxs[len(c.secondTobTxs)-1]
 			tobTxsValue = payoutTxs.Value()
 
-			assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), txsHashRoot)
+			assertTobTxs(t, backend, headSlot+1, parentHash, 0, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), txsHashRoot)
 
 			blockSubmitReq = prepareBlockSubmitRequest(t, payloadJSONFilename2, submissionSlot, uint64(submissionTimestamp), backend)
 
@@ -1755,6 +1759,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 					ParentHash: parentHash,
 					TobTxs:     txs,
 					Slot:       headSlot + 1,
+					TobSlotId:  0,
 				}
 				jsonReq, err := req.MarshalJSON()
 				require.NoError(t, err)
@@ -1766,7 +1771,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 
 				payoutTxs := c.tobTxs[len(c.tobTxs)-1]
 				tobTxsValue = payoutTxs.Value()
-				assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot)
+				assertTobTxs(t, backend, headSlot+1, parentHash, 0, tobTxsValue, txsHashRoot)
 			} else {
 				backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{
 					simulationError: nil,

@@ -55,7 +55,7 @@ var (
 	UniswapFactory2 = "uniswap_factory_2"
 	UniV3SwapRouter = "uniswap_v3_swap_router"
 
-	MaxTobSlots = 3
+	MaxTobSlots = uint64(3)
 )
 
 type EthNetworkDetails struct {
