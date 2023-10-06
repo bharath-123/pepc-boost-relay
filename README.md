@@ -3,6 +3,8 @@
 
 A prototype for an out-of-protocol PEPC-type block allocation mechanism (PBS).
 
+PEPC-Boost leverages existing flashbots relay and builder infra to build a relay which can hold seperate auctions for the ToB(top-of-block) slot and RoB(rest-of-block) slot of a block.
+
 Currently in works! Please use it with caution!
 
 ### See also
