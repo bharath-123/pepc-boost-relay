@@ -23,10 +23,11 @@ import (
 )
 
 var (
-	uniswapV2Addr       = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
-	blockSubmitPath     = "/relay/v1/builder/blocks"
-	tobTxSubmitPath     = "/relay/v1/builder/tob_txs"
-	payloadJSONFilename = "../../testdata/submitBlockPayloadCapella_Goerli.json.gz"
+	randomAddr           = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
+	blockSubmitPath      = "/relay/v1/builder/blocks"
+	tobTxSubmitPath      = "/relay/v1/builder/tob_txs"
+	payloadJSONFilename  = "../../testdata/submitBlockPayloadCapella_Goerli.json.gz"
+	payloadJSONFilename2 = "../../testdata/submitBlockPayloadCapella_Goerli2.json.gz"
 )
 
 func prepareBackend(t *testing.T, backend *testBackend, slot uint64, parentHash string, feeRec types.Address, withdrawalsRoot []byte, prevRandao string, proposerPubkey phase0.BLSPubKey, network string) {
@@ -69,7 +70,6 @@ func prepareBlockSubmitRequest(t *testing.T, payloadJSONFilename string, submiss
 	requestPayloadJSONBytes := common.LoadGzippedBytes(t, payloadJSONFilename)
 	err := json.Unmarshal(requestPayloadJSONBytes, &req)
 	require.NoError(t, err)
-
 	// Update
 	req.Capella.Message.Slot = submissionSlot
 	req.Capella.ExecutionPayload.Timestamp = submissionTimestamp
@@ -306,7 +306,7 @@ func TestIsTraceEthUsdcSwap(t *testing.T) {
 	pairToDifferentAddress := new(common.CallTrace)
 	err = json.Unmarshal(ethUsdcTraceContents, pairToDifferentAddress)
 	// some random address
-	pairToDifferentAddress.To = &uniswapV2Addr
+	pairToDifferentAddress.To = &randomAddr
 
 	ethUsdcTraceDifferentMethod := new(common.CallTrace)
 	err = json.Unmarshal(ethUsdcTraceContents, ethUsdcTraceDifferentMethod)
@@ -370,7 +370,7 @@ func TestIsTraceToWEthDaiPair(t *testing.T) {
 	pairToDifferentAddress := new(common.CallTrace)
 	err = json.Unmarshal(wethDaiTraceContents, pairToDifferentAddress)
 	// some random address
-	pairToDifferentAddress.To = &uniswapV2Addr
+	pairToDifferentAddress.To = &randomAddr
 
 	wethDaiTraceDifferentMethod := new(common.CallTrace)
 	err = json.Unmarshal(wethDaiTraceContents, wethDaiTraceDifferentMethod)
@@ -496,7 +496,7 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Addr,
+					To:       &randomAddr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -520,7 +520,7 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Addr,
+					To:       &randomAddr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -568,7 +568,7 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
-					To:       &uniswapV2Addr,
+					To:       &randomAddr,
 					Value:    big.NewInt(2),
 					Data:     []byte("tx1"),
 				}),
@@ -1117,7 +1117,7 @@ func TestSubmitTobTxs(t *testing.T) {
 					Nonce:    3,
 					GasPrice: big.NewInt(3),
 					Gas:      3,
-					To:       &uniswapV2Addr,
+					To:       &randomAddr,
 					Value:    big.NewInt(3),
 					Data:     []byte("tx6"),
 				}),
@@ -1313,6 +1313,11 @@ func assertBlock(t *testing.T, backend *testBackend, headSlot uint64, parentHash
 	for i, robtx := range payloadRobTxs {
 		expectedRobTx := blockSubmitReq.Capella.ExecutionPayload.Transactions[i]
 		require.Equal(t, expectedRobTx, robtx)
+	}
+	if len(tobTxs) > 0 {
+		includedTobTxs, err := backend.relay.db.GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash(headSlot+1, blockSubmitReq.ParentHash(), blockSubmitReq.BlockHash())
+		require.NoError(t, err)
+		require.Equal(t, len(tobTxs), len(includedTobTxs))
 	}
 }
 
@@ -1611,7 +1616,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 
 			assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), txsHashRoot)
 
-			blockSubmitReq = prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
+			blockSubmitReq = prepareBlockSubmitRequest(t, payloadJSONFilename2, submissionSlot, uint64(submissionTimestamp), backend)
 
 			totalExpectedBidValue = big.NewInt(0).Add(blockSubmitReq.Message().Value.ToBig(), tobTxsValue)
 

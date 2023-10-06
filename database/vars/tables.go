@@ -15,4 +15,5 @@ var (
 	TableBuilderDemotions       = tableBase + "_builder_demotions"
 	TableBlockedValidator       = tableBase + "_blocked_validator"
 	TableTooLateGetPayload      = tableBase + "_too_late_get_payload"
+	TableIncludedTobTxs         = tableBase + "_included_tob_txs"
 )

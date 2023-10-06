@@ -65,6 +65,7 @@ func newTestBackend(t *testing.T, numBeaconNodes int, network string) *testBacke
 		BlockSubmissions: map[string]*database.BuilderBlockSubmissionEntry{},
 		Builders:         map[string]*database.BlockBuilderEntry{},
 		Demotions:        map[string]bool{},
+		IncludedTobTxs:   map[string][]*database.IncludedTobTxEntry{},
 	}
 
 	ds, err := datastore.NewDatastore(redisCache, nil, db)
@@ -409,7 +410,7 @@ func TestDataApiGetDataProposerPayloadDelivered(t *testing.T) {
 }
 
 func TestBuilderSubmitBlockSSZ(t *testing.T) {
-	requestPayloadJSONBytes := common.LoadGzippedBytes(t, "../../testdata/submitBlockPayloadCapella_Goerli.json.gz")
+	requestPayloadJSONBytes := common.LoadGzippedBytes(t, "../../testdata/submitBlockPayloadCapella_Goerli2.json.gz")
 
 	req := new(common.BuilderSubmitBlockRequest)
 	err := json.Unmarshal(requestPayloadJSONBytes, &req)
