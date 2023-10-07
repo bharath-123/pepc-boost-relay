@@ -88,7 +88,7 @@ func prepareBlockSubmitRequest(t *testing.T, payloadJSONFilename string, submiss
 	return req
 }
 
-func assertTobTxs(t *testing.T, backend *testBackend, slot uint64, parentHash string, tobTxValue *big.Int, txHashRoot [32]byte) {
+func assertTobTxs(t *testing.T, backend *testBackend, slot uint64, parentHash string, tobTxValue *big.Int, txHashRoot [32]byte, expectedNoOfTobs int) {
 	tobTxValue, err := backend.redis.GetTobTxValue(context.Background(), backend.redis.NewPipeline(), slot, parentHash)
 	require.NoError(t, err)
 	require.Equal(t, tobTxValue, tobTxValue)
@@ -96,22 +96,21 @@ func assertTobTxs(t *testing.T, backend *testBackend, slot uint64, parentHash st
 	tobtxs, err := backend.redis.GetTobTx(context.Background(), backend.redis.NewTxPipeline(), slot, parentHash)
 	require.NoError(t, err)
 
-	require.Equal(t, 2, len(tobtxs))
+	require.Equal(t, expectedNoOfTobs, len(tobtxs))
 
-	firstTx := new(gethtypes.Transaction)
-	err = firstTx.UnmarshalBinary(tobtxs[0])
-	require.NoError(t, err)
+	txsPostStoringInRedis := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
 
-	secondTx := new(gethtypes.Transaction)
-	err = secondTx.UnmarshalBinary(tobtxs[1])
-	require.NoError(t, err)
+	for _, tobtx := range tobtxs {
+		tx := new(gethtypes.Transaction)
+		err = tx.UnmarshalBinary(tobtx)
+		require.NoError(t, err)
 
-	firstTxBytes, err := firstTx.MarshalBinary()
-	require.NoError(t, err)
-	secondTxBytes, err := secondTx.MarshalBinary()
-	require.NoError(t, err)
+		txBytes, err := tx.MarshalBinary()
+		require.NoError(t, err)
 
-	txsPostStoringInRedis := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{firstTxBytes, secondTxBytes}}
+		txsPostStoringInRedis.Transactions = append(txsPostStoringInRedis.Transactions, txBytes)
+	}
+
 	txsPostStoringInRedisHashRoot, err := txsPostStoringInRedis.HashTreeRoot()
 	require.NoError(t, err)
 	require.Equal(t, txHashRoot, txsPostStoringInRedisHashRoot)
@@ -1018,7 +1017,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, rr.Code)
 			// first checks should check for the first set of tob txs
-			assertTobTxs(t, backend, headSlot+1, parentHash, c.firstTobTxs[len(c.firstTobTxs)-1].Value(), firstSetTxHashRoot)
+			assertTobTxs(t, backend, headSlot+1, parentHash, c.firstTobTxs[len(c.firstTobTxs)-1].Value(), firstSetTxHashRoot, len(c.firstTobTxs))
 
 			// submit second set of txs
 			backend.relay.tracer = &MockTracer{
@@ -1049,7 +1048,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 				require.Contains(t, rr.Body.String(), "TOB tx value is less than the current value!")
 			} else {
 				// the tob txs should be the second set
-				assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), secondSetTxHashRoot)
+				assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), secondSetTxHashRoot, len(c.secondTobTxs))
 			}
 		})
 	}
@@ -1202,8 +1201,24 @@ func TestSubmitTobTxs(t *testing.T) {
 			slotDelta:     1,
 		},
 		{
-			description: "devnet Valid TobTxs sent",
+			description: "devnet Valid TobTxs sent with 3 tob txs",
 			tobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
+				}),
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    validWethDaiTx.Nonce(),
 					GasPrice: validWethDaiTx.GasPrice(),
@@ -1266,7 +1281,7 @@ func TestSubmitTobTxs(t *testing.T) {
 				require.Contains(t, rr.Body.String(), c.requiredError)
 				return
 			}
-			assertTobTxs(t, backend, headSlot+1, parentHash, c.tobTxs[len(c.tobTxs)-1].Value(), txHashRoot)
+			assertTobTxs(t, backend, headSlot+1, parentHash, c.tobTxs[len(c.tobTxs)-1].Value(), txHashRoot, len(c.tobTxs))
 
 		})
 	}
@@ -1575,7 +1590,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			payoutTxs := c.firstTobTxs[len(c.firstTobTxs)-1]
 			tobTxsValue := payoutTxs.Value()
 
-			assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot)
+			assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot, len(c.firstTobTxs))
 
 			// Prepare the request payload
 			blockSubmitReq := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
@@ -1630,7 +1645,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			payoutTxs = c.secondTobTxs[len(c.secondTobTxs)-1]
 			tobTxsValue = payoutTxs.Value()
 
-			assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), txsHashRoot)
+			assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), txsHashRoot, len(c.secondTobTxs))
 
 			blockSubmitReq = prepareBlockSubmitRequest(t, payloadJSONFilename2, submissionSlot, uint64(submissionTimestamp), backend)
 
@@ -1729,6 +1744,46 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			traces:        validEthUsdcTxTrace,
 			requiredError: "",
 		},
+		{
+			description: "custom devnet 3 ToB txs are present",
+			tobTxs: []*gethtypes.Transaction{
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    validWethDaiTx.Nonce(),
+					GasPrice: validWethDaiTx.GasPrice(),
+					Gas:      validWethDaiTx.Gas(),
+					To:       validWethDaiTx.To(),
+					Value:    validWethDaiTx.Value(),
+					Data:     validWethDaiTx.Data(),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			network:       common.EthNetworkCustom,
+			traces:        validWethDaiTxTrace,
+			requiredError: "",
+		},
 	}
 
 	for _, c := range cases {
@@ -1782,7 +1837,7 @@ func TestSubmitBuilderBlock(t *testing.T) {
 
 				payoutTxs := c.tobTxs[len(c.tobTxs)-1]
 				tobTxsValue = payoutTxs.Value()
-				assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot)
+				assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot, len(c.tobTxs))
 			} else {
 				backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{
 					simulationError: nil,
