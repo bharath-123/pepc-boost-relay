@@ -24,7 +24,7 @@ import (
 
 var (
 	randomAddr           = common2.HexToAddress("0xB9D7a3554F221B34f49d7d3C61375E603aFb699e")
-	blockSubmitPath      = "/relay/v1/builder/blocks"
+	blockSubmitPath      = "/relay/v1/builder/rob_blocks"
 	tobTxSubmitPath      = "/relay/v1/builder/tob_txs"
 	payloadJSONFilename  = "../../testdata/submitBlockPayloadCapella_Goerli.json.gz"
 	payloadJSONFilename2 = "../../testdata/submitBlockPayloadCapella_Goerli2.json.gz"
