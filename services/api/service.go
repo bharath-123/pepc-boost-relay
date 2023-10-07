@@ -634,7 +634,7 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 }
 
 // TODO - come up with better name? state interference is not really descriptive name
-func (api *RelayAPI) StateInterferenceChecks(trace *common.CallTrace) (bool, error) {
+func (api *RelayAPI) TobTxChecks(trace *common.CallTrace) (bool, error) {
 	if api.opts.EthNetDetails.Name == common.EthNetworkCustom {
 		return api.TraceChecker(trace, api.IsTraceToWEthDaiPair)
 	} else if api.opts.EthNetDetails.Name == common.EthNetworkGoerli {
@@ -645,7 +645,7 @@ func (api *RelayAPI) StateInterferenceChecks(trace *common.CallTrace) (bool, err
 }
 
 // just check if it goes to the DaiWethPair with a swap tx
-func (api *RelayAPI) TraceChecker(trace *common.CallTrace, f common.NetworkStateInterferenceChecker) (bool, error) {
+func (api *RelayAPI) TraceChecker(trace *common.CallTrace, f common.NetworkTobTxChecker) (bool, error) {
 	stack := []common.CallTrace{*trace}
 
 	for len(stack) > 0 {
@@ -1915,31 +1915,28 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 
 // Checks the quality of the TOB txs, if it is the txs expected in a TOB
 func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log *logrus.Entry) error {
-	if len(txs) > 2 {
-		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
-	}
+	//// get traces
+	for _, tx := range txs {
+		// some sanity checks
+		if tx.To() == nil {
+			return fmt.Errorf("contract creation cannot be a TOB tx")
+		}
 
-	// get traces
-	firstTx := txs[0]
-	// some sanity checks
-	if firstTx.To() == nil {
-		return fmt.Errorf("contract creation cannot be a TOB tx")
-	}
+		txTraces, err := api.getTraces(context.Background(), tracerOptions{
+			log: log,
+			tx:  tx,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to get traces: %s", err.Error())
+		}
 
-	txTraces, err := api.getTraces(context.Background(), tracerOptions{
-		log: log,
-		tx:  firstTx,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get traces: %s", err.Error())
-	}
-
-	res, err := api.StateInterferenceChecks(&txTraces.Result)
-	if err != nil {
-		return fmt.Errorf("state interference checks failed with: %s", err.Error())
-	}
-	if !res {
-		return fmt.Errorf("not a valid tob tx")
+		res, err := api.TobTxChecks(&txTraces.Result)
+		if err != nil {
+			return fmt.Errorf("state interference checks failed with: %s", err.Error())
+		}
+		if !res {
+			return fmt.Errorf("not a valid tob tx")
+		}
 	}
 
 	return nil
@@ -2016,8 +2013,8 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	if len(tobTxRequest.TobTxs.Transactions) == 1 {
 		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
 	}
-	if len(tobTxRequest.TobTxs.Transactions) > 2 {
-		api.Respond(w, http.StatusBadRequest, "we support only 1 tx on the TOB currently, got %d")
+	if len(tobTxRequest.TobTxs.Transactions) > common.MaxTobTxs+1 {
+		api.Respond(w, http.StatusBadRequest, fmt.Sprintf("we support only %d txs on the TOB currently, got %d", common.MaxTobTxs, len(tobTxRequest.TobTxs.Transactions)))
 	}
 
 	api.proposerDutiesLock.RLock()
