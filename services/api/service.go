@@ -426,7 +426,7 @@ func (api *RelayAPI) getRouter() http.Handler {
 		r.HandleFunc(pathSubmitNewBlock, api.handleSubmitNewBlock).Methods(http.MethodPost)
 		r.HandleFunc(pathSubmitNewRobBlock, api.handleSubmitNewRobBlock).Methods(http.MethodPost)
 		r.HandleFunc(pathSubmitNewTobTxs, api.handleSubmitNewTobTxs).Methods(http.MethodPost)
-		r.HandleFunc(pathGetTobGasReservations, api.).Methods(http.MethodGet)
+		r.HandleFunc(pathGetTobGasReservations, api.handleGetTobGasReservations).Methods(http.MethodGet)
 	}
 
 	// Data API
