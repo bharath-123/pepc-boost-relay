@@ -54,6 +54,8 @@ var (
 	UniswapFactory1 = "uniswap_factory_1"
 	UniswapFactory2 = "uniswap_factory_2"
 	UniV3SwapRouter = "uniswap_v3_swap_router"
+
+	TobGasReservations = 1000000
 )
 
 type EthNetworkDetails struct {

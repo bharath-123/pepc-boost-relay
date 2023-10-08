@@ -73,10 +73,11 @@ var (
 	pathGetPayload        = "/eth/v1/builder/blinded_blocks"
 
 	// Block builder API
-	pathBuilderGetValidators = "/relay/v1/builder/validators"
-	pathSubmitNewBlock       = "/relay/v1/builder/blocks"
-	pathSubmitNewRobBlock    = "/relay/v1/builder/rob_blocks"
-	pathSubmitNewTobTxs      = "/relay/v1/builder/tob_txs"
+	pathBuilderGetValidators  = "/relay/v1/builder/validators"
+	pathSubmitNewBlock        = "/relay/v1/builder/blocks"
+	pathSubmitNewRobBlock     = "/relay/v1/builder/rob_blocks"
+	pathSubmitNewTobTxs       = "/relay/v1/builder/tob_txs"
+	pathGetTobGasReservations = "/relay/v1/builder/tob_gas_reservations"
 
 	// Data API
 	pathDataProposerPayloadDelivered = "/relay/v1/data/bidtraces/proposer_payload_delivered"
@@ -425,6 +426,7 @@ func (api *RelayAPI) getRouter() http.Handler {
 		r.HandleFunc(pathSubmitNewBlock, api.handleSubmitNewBlock).Methods(http.MethodPost)
 		r.HandleFunc(pathSubmitNewRobBlock, api.handleSubmitNewRobBlock).Methods(http.MethodPost)
 		r.HandleFunc(pathSubmitNewTobTxs, api.handleSubmitNewTobTxs).Methods(http.MethodPost)
+		r.HandleFunc(pathGetTobGasReservations, api.).Methods(http.MethodGet)
 	}
 
 	// Data API
@@ -1943,6 +1945,10 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 	}
 
 	return nil
+}
+
+func (api *RelayAPI) handleGetTobGasReservations(w http.ResponseWriter, req *http.Request) {
+	api.RespondOK(w, common.TobGasReservations)
 }
 
 func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Request) {
