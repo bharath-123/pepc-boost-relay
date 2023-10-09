@@ -2890,7 +2890,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 			builder:    builderEntry,
 			req: &common.BuilderBlockValidationRequest{
 				BuilderSubmitBlockRequest: *payload,
-				RegisteredGasLimit:        gasLimit,
+				RegisteredGasLimit:        gasLimit - uint64(common.TobGasReservations),
 			},
 		}
 
