@@ -2043,6 +2043,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 			TobTxs:               tobTxRequest.TobTxs,
 			ParentHash:           tobTxRequest.ParentHash,
 			ProposerFeeRecipient: validatorFeeRecipient.String(),
+			TobGasLimit:          uint64(common.TobGasReservations),
 		},
 	})
 	if err != nil {
