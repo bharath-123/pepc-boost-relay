@@ -633,7 +633,6 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 	}
 }
 
-// TODO - come up with better name? state interference is not really descriptive name
 func (api *RelayAPI) TobTxChecks(trace *common.CallTrace) (bool, error) {
 	if api.opts.EthNetDetails.Name == common.EthNetworkCustom {
 		return api.TraceChecker(trace, api.IsTraceToWEthDaiPair)
