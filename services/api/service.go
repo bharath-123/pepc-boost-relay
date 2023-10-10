@@ -73,10 +73,11 @@ var (
 	pathGetPayload        = "/eth/v1/builder/blinded_blocks"
 
 	// Block builder API
-	pathBuilderGetValidators = "/relay/v1/builder/validators"
-	pathSubmitNewBlock       = "/relay/v1/builder/blocks"
-	pathSubmitNewRobBlock    = "/relay/v1/builder/rob_blocks"
-	pathSubmitNewTobTxs      = "/relay/v1/builder/tob_txs"
+	pathBuilderGetValidators  = "/relay/v1/builder/validators"
+	pathSubmitNewBlock        = "/relay/v1/builder/blocks"
+	pathSubmitNewRobBlock     = "/relay/v1/builder/rob_blocks"
+	pathSubmitNewTobTxs       = "/relay/v1/builder/tob_txs"
+	pathGetTobGasReservations = "/relay/v1/builder/tob_gas_reservations"
 
 	// Data API
 	pathDataProposerPayloadDelivered = "/relay/v1/data/bidtraces/proposer_payload_delivered"
@@ -425,6 +426,7 @@ func (api *RelayAPI) getRouter() http.Handler {
 		r.HandleFunc(pathSubmitNewBlock, api.handleSubmitNewBlock).Methods(http.MethodPost)
 		r.HandleFunc(pathSubmitNewRobBlock, api.handleSubmitNewRobBlock).Methods(http.MethodPost)
 		r.HandleFunc(pathSubmitNewTobTxs, api.handleSubmitNewTobTxs).Methods(http.MethodPost)
+		r.HandleFunc(pathGetTobGasReservations, api.handleGetTobGasReservations).Methods(http.MethodGet)
 	}
 
 	// Data API
@@ -1941,6 +1943,10 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 	return nil
 }
 
+func (api *RelayAPI) handleGetTobGasReservations(w http.ResponseWriter, req *http.Request) {
+	api.RespondOK(w, common.TobGasReservations)
+}
+
 func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Request) {
 	headSlot := api.headSlot.Load()
 	receivedAt := time.Now().UTC()
@@ -2033,6 +2039,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 			TobTxs:               tobTxRequest.TobTxs,
 			ParentHash:           tobTxRequest.ParentHash,
 			ProposerFeeRecipient: validatorFeeRecipient.String(),
+			TobGasLimit:          uint64(common.TobGasReservations),
 		},
 	})
 	if err != nil {
@@ -2760,7 +2767,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 				return
 			}
 			for _, tx := range txs {
-				err := api.db.InsertIncludedTobTx(tx.Hash().String(), payload.Slot(), payload.ParentHash(), payload.BlockHash())
+				err := api.db.InsertIncludedTobTx(tx.Hash().String(), payload.Slot(), payload.ParentHash(), res.assembledPayload.BlockHash())
 				if err != nil {
 					log.WithError(err).Warn("could not insert included tob tx")
 					return
@@ -2879,7 +2886,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 			builder:    builderEntry,
 			req: &common.BuilderBlockValidationRequest{
 				BuilderSubmitBlockRequest: *payload,
-				RegisteredGasLimit:        gasLimit,
+				RegisteredGasLimit:        gasLimit - uint64(common.TobGasReservations),
 			},
 		}
 
@@ -2891,6 +2898,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 
 		// Simulate block (synchronously).
 		requestErr, validationErr := api.simulateBlock(context.Background(), opts) // success/error logging happens inside
+		log.Infof("DEBUG: Simulating block hash %s", payload.BlockHash())
 		simResultC <- &blockSimResult{requestErr == nil, false, requestErr, validationErr}
 		validationDurationMs := time.Since(timeBeforeValidation).Milliseconds()
 		log = log.WithFields(logrus.Fields{
@@ -2916,6 +2924,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 
 	// Prepare the response data
 	getHeaderResponse, err := common.BuildGetHeaderResponse(builderSubmission, api.blsSk, api.publicKey, api.opts.EthNetDetails.DomainBuilder)
+	log.Infof("DEBUG: Blockhash in getHeaderResponse is %s\n", getHeaderResponse.BlockHash())
 	if err != nil {
 		log.WithError(err).Error("could not sign builder bid")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
