@@ -47,6 +47,7 @@ var (
 	// this is for storing DeFi addresses for state interference checks
 	DaiToken  = "dai"
 	WethToken = "weth"
+	WbtcToken = "wbtc"
 	UsdcToken = "usdc"
 	// 2 addresses are specifically in custom devnet, we have 2 pairs of Dai/Weth for arbitrage tests
 	DaiWethPair1    = "dai_weth_pair_1"

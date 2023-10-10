@@ -279,6 +279,8 @@ func FillUpDefiAddresses(opts RelayAPIOpts) map[string]common2.Address {
 	} else if opts.EthNetDetails.Name == common.EthNetworkGoerli {
 		defiAddresses[common.WethToken] = common2.HexToAddress("0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6")
 		defiAddresses[common.UsdcToken] = common2.HexToAddress("0x9B2660A7BEcd0Bf3d90401D1C214d2CD36317da5")
+		defiAddresses[common.WbtcToken] = common2.HexToAddress("0xC04B0d3107736C32e19F1c62b2aF67BE61d63a05")
+		defiAddresses[common.DaiToken] = common2.HexToAddress("0x11fe4b6ae13d2a6055c8d9cf65c55bac32b5d844")
 		defiAddresses[common.UniV3SwapRouter] = common2.HexToAddress("0xE592427A0AEce92De3Edee1F18E0157C05861564")
 	} else if opts.EthNetDetails.Name == common.EthNetworkCustom {
 
@@ -700,7 +702,6 @@ func (api *RelayAPI) IsTraceUniV3EthUsdcSwap(callTrace common.CallTrace) (bool, 
 	if err != nil {
 		return false, err
 	}
-	// TODO - we should support other uniswap smart contract calls. Support one for now.
 	exactInputSingleId := uniV3SwapRouterAbi.Methods["exactInputSingle"].ID
 	if !bytes.Equal(callTrace.Input[:4], exactInputSingleId) {
 		return false, nil
@@ -711,21 +712,30 @@ func (api *RelayAPI) IsTraceUniV3EthUsdcSwap(callTrace common.CallTrace) (bool, 
 	if err != nil {
 		return false, err
 	}
-	// TODO - this is inefficient, i was not able to cast the interface to the struct for some reason. re-visit this later
 	argBytes, err := json.Marshal(args)
 	swapRouterParams := new(contracts.ISwapRouterExactInputSingleParams)
 	err = json.Unmarshal(argBytes, swapRouterParams)
 	if err != nil {
 		return false, err
 	}
-	if swapRouterParams.TokenIn != api.defiAddresses[common.WethToken] && swapRouterParams.TokenIn != api.defiAddresses[common.UsdcToken] {
-		return false, nil
-	}
-	if swapRouterParams.TokenOut != api.defiAddresses[common.UsdcToken] && swapRouterParams.TokenOut != api.defiAddresses[common.WethToken] {
-		return false, nil
+
+	validTokenPairs := [][2]common2.Address{
+		{api.defiAddresses[common.WethToken], api.defiAddresses[common.UsdcToken]},
+		{api.defiAddresses[common.WethToken], api.defiAddresses[common.WbtcToken]},
+		{api.defiAddresses[common.WethToken], api.defiAddresses[common.DaiToken]},
 	}
 
-	return true, nil
+	// check if (tokenIn, tokenOut) == (WETH, USDC) or (USDC, WETH) or (WETH, WBTC) or (WBTC, WETH) or (WETH, DAI) or (DAI, WETH)
+	for _, tokenPairs := range validTokenPairs {
+		if swapRouterParams.TokenIn == tokenPairs[0] && swapRouterParams.TokenOut == tokenPairs[1] {
+			return true, nil
+		}
+		if swapRouterParams.TokenIn == tokenPairs[1] && swapRouterParams.TokenOut == tokenPairs[0] {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // This will change based on the state interference check
