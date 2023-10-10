@@ -1917,10 +1917,13 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 // Checks the quality of the TOB txs, if it is the txs expected in a TOB
 func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log *logrus.Entry) error {
 	//// get traces
-	for _, tx := range txs {
+	for i, tx := range txs {
 		// some sanity checks
 		if tx.To() == nil {
 			return fmt.Errorf("contract creation cannot be a TOB tx")
+		}
+		if i == len(txs)-1 {
+			continue
 		}
 
 		txTraces, err := api.getTraces(context.Background(), tracerOptions{
