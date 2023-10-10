@@ -54,6 +54,8 @@ var (
 	UniswapFactory1 = "uniswap_factory_1"
 	UniswapFactory2 = "uniswap_factory_2"
 	UniV3SwapRouter = "uniswap_v3_swap_router"
+
+	TobGasReservations = 1000000
 )
 
 type EthNetworkDetails struct {
@@ -964,12 +966,14 @@ type TobValidationRequest struct {
 	TobTxs               utilbellatrix.ExecutionPayloadTransactions
 	ParentHash           string
 	ProposerFeeRecipient string
+	TobGasLimit          uint64
 }
 
 type IntermediateTobValidationRequest struct {
 	TobTxs               []byte `json:"tob_txs"`
 	ParentHash           string `json:"parent_hash"`
 	ProposerFeeRecipient string `json:"proposer_fee_recipient"`
+	TobGasLimit          uint64 `json:"tob_gas_limit,string"`
 }
 
 func (t *TobValidationRequest) MarshalJson() ([]byte, error) {
@@ -982,6 +986,7 @@ func (t *TobValidationRequest) MarshalJson() ([]byte, error) {
 		TobTxs:               sszedTobTxs,
 		ParentHash:           t.ParentHash,
 		ProposerFeeRecipient: t.ProposerFeeRecipient,
+		TobGasLimit:          t.TobGasLimit,
 	}
 
 	return json.Marshal(intermediateStruct)
@@ -999,6 +1004,8 @@ func (t *TobValidationRequest) UnmarshalJson(data []byte) error {
 		return err
 	}
 	t.ParentHash = intermediateJson.ParentHash
+	t.ProposerFeeRecipient = intermediateJson.ProposerFeeRecipient
+	t.TobGasLimit = intermediateJson.TobGasLimit
 
 	return nil
 }
