@@ -1163,10 +1163,17 @@ func (api *RelayAPI) handleGetProposerForSlot(w http.ResponseWriter, req *http.R
 	if err != nil {
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 	}
+	log := api.log.WithFields(logrus.Fields{
+		"method":        "handleGetProposerForSlot",
+		"headSlot":      api.headSlot.Load(),
+		"contentLength": req.ContentLength,
+	})
 
 	api.payloadAttributesLock.RLock()
 	res, ok := api.payloadAttributesBySlot[slot]
 	api.payloadAttributesLock.RUnlock()
+
+	log.Infof("payload attributes: %+v", res)
 
 	if !ok {
 		api.RespondError(w, http.StatusNotFound, "slot proposer duties not found")
