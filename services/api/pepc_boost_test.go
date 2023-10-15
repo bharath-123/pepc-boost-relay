@@ -185,11 +185,35 @@ func GetGoerliTracingRelatedTestData(t *testing.T) GoerliTestTraces {
 	err = json.Unmarshal(invalidEthUsdcTxTraceContents, invalidEthUsdcTxTrace)
 	require.NoError(t, err)
 
+	validEthDaiTxContents := common.LoadFileContents(t, "../../testdata/traces/goerli/valid_eth_dai_tx.json")
+	validEthDaiTx := new(gethtypes.Transaction)
+	err = validEthDaiTx.UnmarshalJSON(validEthDaiTxContents)
+	require.NoError(t, err)
+
+	validEthDaiTxTraceContents := common.LoadFileContents(t, "../../testdata/traces/goerli/valid_eth_dai_tx_trace.json")
+	validEthDaiTxTrace := new(common.CallTrace)
+	err = json.Unmarshal(validEthDaiTxTraceContents, validEthDaiTxTrace)
+	require.NoError(t, err)
+
+	validEthWbtcTxContents := common.LoadFileContents(t, "../../testdata/traces/goerli/valid_eth_wbtc_tx.json")
+	validEthWbtcTx := new(gethtypes.Transaction)
+	err = validEthWbtcTx.UnmarshalJSON(validEthWbtcTxContents)
+	require.NoError(t, err)
+
+	validEthWbtcTxTraceContents := common.LoadFileContents(t, "../../testdata/traces/goerli/valid_eth_wbtc_tx_trace.json")
+	validEthWbtcTxTrace := new(common.CallTrace)
+	err = json.Unmarshal(validEthWbtcTxTraceContents, validEthWbtcTxTrace)
+	require.NoError(t, err)
+
 	return GoerliTestTraces{
 		ValidEthUsdcTx:      validEthUsdcTx,
 		ValidEthUsdcTxTrace: validEthUsdcTxTrace,
 		InvalidTx:           invalidEthUsdcTx,
 		InvalidTxTrace:      invalidEthUsdcTxTrace,
+		ValidEthWbtcTx:      validEthWbtcTx,
+		ValidEthWbtcTxTrace: validEthWbtcTxTrace,
+		ValidEthDaiTx:       validEthDaiTx,
+		ValidEthDaiTxTrace:  validEthDaiTxTrace,
 	}
 }
 
@@ -339,6 +363,16 @@ func TestIsTraceEthUsdcSwap(t *testing.T) {
 	err = json.Unmarshal(ethUsdcTraceContents, ethUsdcTraceDifferentMethod)
 	ethUsdcTraceDifferentMethod.Input = append([]byte("0x1234"), ethUsdcTrace.Input[4:]...)
 
+	ethBtcTraceContents := common.LoadFileContents(t, "../../testdata/traces/goerli/eth_wbtc_trace.json")
+	ethBtcTrace := new(common.CallTrace)
+	err = json.Unmarshal(ethBtcTraceContents, ethBtcTrace)
+	require.NoError(t, err)
+
+	ethDaiTraceContents := common.LoadFileContents(t, "../../testdata/traces/goerli/eth_dai_trace.json")
+	ethDaiTrace := new(common.CallTrace)
+	err = json.Unmarshal(ethDaiTraceContents, ethDaiTrace)
+	require.NoError(t, err)
+
 	cases := []struct {
 		description    string
 		callTrace      common.CallTrace
@@ -346,7 +380,25 @@ func TestIsTraceEthUsdcSwap(t *testing.T) {
 		requiredError  string
 	}{
 		{
-			description:    "valid trace",
+			description:    "valid eth usdc trace",
+			callTrace:      *ethUsdcTrace,
+			isTraceCorrect: true,
+			requiredError:  "",
+		},
+		{
+			description:    "valid eth wbtc trace",
+			callTrace:      *ethBtcTrace,
+			isTraceCorrect: true,
+			requiredError:  "",
+		},
+		{
+			description:    "valid eth dai trace",
+			callTrace:      *ethDaiTrace,
+			isTraceCorrect: true,
+			requiredError:  "",
+		},
+		{
+			description:    "valid eth dai trace",
 			callTrace:      *ethUsdcTrace,
 			isTraceCorrect: true,
 			requiredError:  "",
@@ -742,7 +794,7 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 			requiredError: "not a valid tob tx",
 		},
 		{
-			description: "Valid goerli ToB txs",
+			description: "1 valid goerli ToB tx",
 			txs: []*gethtypes.Transaction{
 				goerliTraceData.ValidEthUsdcTx,
 				gethtypes.NewTx(&gethtypes.LegacyTx{
@@ -757,6 +809,73 @@ func TestNetworkDependentCheckTxAndSenderValidity(t *testing.T) {
 			callTraces:    map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
 			network:       common.EthNetworkGoerli,
 			requiredError: "",
+		},
+		{
+			description: "2 valid goerli ToB tx",
+			txs: []*gethtypes.Transaction{
+				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			callTraces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+			},
+			network:       common.EthNetworkGoerli,
+			requiredError: "",
+		},
+		{
+			description: "3 valid goerli ToB tx",
+			txs: []*gethtypes.Transaction{
+				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
+				goerliTraceData.ValidEthDaiTx,
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			callTraces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+				goerliTraceData.ValidEthDaiTx.Hash():  goerliTraceData.ValidEthDaiTxTrace,
+			},
+			network:       common.EthNetworkGoerli,
+			requiredError: "",
+		},
+		{
+			description: "2 valid goerli ToB tx and 1 invalid tx",
+			txs: []*gethtypes.Transaction{
+				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
+				goerliTraceData.InvalidTx,
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			callTraces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+				goerliTraceData.InvalidTx.Hash():      goerliTraceData.InvalidTxTrace,
+			},
+			network:       common.EthNetworkGoerli,
+			requiredError: "not a valid tob tx",
 		},
 	}
 
@@ -869,6 +988,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			description: "goerli first set of txs is higher",
 			firstTobTxs: []*gethtypes.Transaction{
 				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
@@ -880,6 +1000,7 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			},
 			secondTobTxs: []*gethtypes.Transaction{
 				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthDaiTx,
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
@@ -889,10 +1010,16 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			firstTobTxsTraces:  map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
-			secondTobTxsTraces: map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
-			network:            common.EthNetworkGoerli,
-			nextSentIsHigher:   false,
+			firstTobTxsTraces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+			},
+			secondTobTxsTraces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthDaiTx.Hash():  goerliTraceData.ValidEthDaiTxTrace,
+			},
+			network:          common.EthNetworkGoerli,
+			nextSentIsHigher: false,
 		},
 		{
 			description: "goerli second set of tob txs is higher",
@@ -909,6 +1036,8 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 			},
 			secondTobTxs: []*gethtypes.Transaction{
 				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
+				goerliTraceData.ValidEthDaiTx,
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
@@ -918,10 +1047,14 @@ func TestSubmitTobTxsInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			firstTobTxsTraces:  map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
-			secondTobTxsTraces: map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
-			network:            common.EthNetworkGoerli,
-			nextSentIsHigher:   true,
+			firstTobTxsTraces: map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
+			secondTobTxsTraces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+				goerliTraceData.ValidEthDaiTx.Hash():  goerliTraceData.ValidEthDaiTxTrace,
+			},
+			network:          common.EthNetworkGoerli,
+			nextSentIsHigher: true,
 		},
 	}
 
@@ -1099,7 +1232,7 @@ func TestSubmitTobTxs(t *testing.T) {
 			slotDelta:     1,
 		},
 		{
-			description: "goerli Valid TobTxs sent",
+			description: "goerli 1 Valid TobTxs sent",
 			tobTxs: []*gethtypes.Transaction{
 				goerliTraceData.ValidEthUsdcTx,
 				gethtypes.NewTx(&gethtypes.LegacyTx{
@@ -1112,6 +1245,52 @@ func TestSubmitTobTxs(t *testing.T) {
 				}),
 			},
 			traces:        map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
+			network:       common.EthNetworkGoerli,
+			requiredError: "",
+			slotDelta:     1,
+		},
+		{
+			description: "goerli 2 Valid TobTxs sent",
+			tobTxs: []*gethtypes.Transaction{
+				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    4,
+					GasPrice: big.NewInt(5),
+					Gas:      12,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(10),
+					Data:     []byte(""),
+				}),
+			},
+			traces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+			},
+			network:       common.EthNetworkGoerli,
+			requiredError: "",
+			slotDelta:     1,
+		},
+		{
+			description: "goerli 3 Valid TobTxs sent",
+			tobTxs: []*gethtypes.Transaction{
+				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
+				goerliTraceData.ValidEthDaiTx,
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    4,
+					GasPrice: big.NewInt(5),
+					Gas:      12,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(10),
+					Data:     []byte(""),
+				}),
+			},
+			traces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+				goerliTraceData.ValidEthDaiTx.Hash():  goerliTraceData.ValidEthDaiTxTrace,
+			},
 			network:       common.EthNetworkGoerli,
 			requiredError: "",
 			slotDelta:     1,
@@ -1333,6 +1512,8 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			description: "goerli first set of txs is higher",
 			firstTobTxs: []*gethtypes.Transaction{
 				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
+				goerliTraceData.ValidEthDaiTx,
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
@@ -1353,7 +1534,11 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			firstTobTxsTraces:  map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
+			firstTobTxsTraces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+				goerliTraceData.ValidEthDaiTx.Hash():  goerliTraceData.ValidEthDaiTxTrace,
+			},
 			secondTobTxsTraces: map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
 			network:            common.EthNetworkGoerli,
 			nextSentIsHigher:   false,
@@ -1373,6 +1558,7 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			},
 			secondTobTxs: []*gethtypes.Transaction{
 				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthDaiTx,
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    4,
 					GasPrice: big.NewInt(5),
@@ -1382,10 +1568,13 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 					Data:     []byte(""),
 				}),
 			},
-			firstTobTxsTraces:  map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
-			secondTobTxsTraces: map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
-			network:            common.EthNetworkGoerli,
-			nextSentIsHigher:   true,
+			firstTobTxsTraces: map[common2.Hash]*common.CallTrace{goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace},
+			secondTobTxsTraces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthDaiTx.Hash():  goerliTraceData.ValidEthDaiTxTrace,
+			},
+			network:          common.EthNetworkGoerli,
+			nextSentIsHigher: true,
 		},
 	}
 
@@ -1560,6 +1749,8 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			description: "goerli ToB txs of some value are present",
 			tobTxs: []*gethtypes.Transaction{
 				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
+				goerliTraceData.ValidEthDaiTx,
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
@@ -1572,6 +1763,8 @@ func TestSubmitBuilderBlock(t *testing.T) {
 			network: common.EthNetworkGoerli,
 			traces: map[common2.Hash]*common.CallTrace{
 				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+				goerliTraceData.ValidEthDaiTx.Hash():  goerliTraceData.ValidEthDaiTxTrace,
 			},
 			requiredError: "",
 		},
