@@ -2729,6 +2729,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 	totalBidValue := payload.Value()
 	tobTxValue := big.NewInt(0)
 	if len(tobTxs) > 0 {
+		log.Infof("DEBUG: found %d tob txs", len(tobTxs))
 		tobTxValue, err = api.redis.GetTobTxValue(context.Background(), tx, payload.Slot(), payload.ParentHash())
 		if err != nil {
 			log.WithError(err).Error("failed to get tob tx value from redis")
@@ -2776,6 +2777,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 				}
 			}
 
+			log.Infof("DEBUG: assembled payload: %v", res.assembledPayload)
 			// decode the txs
 			transactionBytes := make([][]byte, len(tobTxs))
 			for i, txHexBytes := range tobTxs {
