@@ -236,7 +236,7 @@ func TestStateInterference(t *testing.T) {
 
 			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
 
-			res, err := backend.relay.StateInterferenceChecks(c.callTraces)
+			res, err := backend.relay.TobTxChecks(c.callTraces)
 			if c.requiredError != "" {
 				require.Contains(t, err.Error(), c.requiredError)
 				return
@@ -459,7 +459,7 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 			requiredError:      "We require a payment tx along with the TOB txs!",
 		},
 		{
-			description: "More than 2 txs sent",
+			description: "More than 4 txs sent excluding payout tx",
 			txs: []*gethtypes.Transaction{
 				gethtypes.NewTx(&gethtypes.LegacyTx{
 					Nonce:    2,
@@ -481,13 +481,29 @@ func TestNetworkIndependentTobTxChecks(t *testing.T) {
 					Nonce:    2,
 					GasPrice: big.NewInt(2),
 					Gas:      2,
+					To:       nil,
+					Value:    big.NewInt(2),
+					Data:     []byte("tx2"),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       nil,
+					Value:    big.NewInt(2),
+					Data:     []byte("tx2"),
+				}),
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
 					To:       &randomAddress,
 					Value:    big.NewInt(110),
 					Data:     []byte(""),
 				}),
 			},
 			callTraces:    nil,
-			requiredError: "we support only 1 tx on the TOB currently, got 3",
+			requiredError: "we support only 3 txs on the TOB currently, got 5",
 		},
 		{
 			description: "zero value payout",

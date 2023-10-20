@@ -56,6 +56,8 @@ var (
 	UniV3SwapRouter = "uniswap_v3_swap_router"
 
 	TobGasReservations = 1000000
+	// allow a max of 3 ToB txs excluding the payout
+	MaxTobTxs = 3
 )
 
 type EthNetworkDetails struct {
@@ -960,7 +962,7 @@ type CallTraceResponse struct {
 	Result CallTrace `json:"result"`
 }
 
-type NetworkStateInterferenceChecker func(CallTrace) (bool, error)
+type NetworkTobTxChecker func(CallTrace) (bool, error)
 
 type TobValidationRequest struct {
 	TobTxs               utilbellatrix.ExecutionPayloadTransactions
