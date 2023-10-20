@@ -279,6 +279,8 @@ func FillUpDefiAddresses(opts RelayAPIOpts) map[string]common2.Address {
 	} else if opts.EthNetDetails.Name == common.EthNetworkGoerli {
 		defiAddresses[common.WethToken] = common2.HexToAddress("0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6")
 		defiAddresses[common.UsdcToken] = common2.HexToAddress("0x9B2660A7BEcd0Bf3d90401D1C214d2CD36317da5")
+		defiAddresses[common.WbtcToken] = common2.HexToAddress("0xC04B0d3107736C32e19F1c62b2aF67BE61d63a05")
+		defiAddresses[common.DaiToken] = common2.HexToAddress("0x11fe4b6ae13d2a6055c8d9cf65c55bac32b5d844")
 		defiAddresses[common.UniV3SwapRouter] = common2.HexToAddress("0xE592427A0AEce92De3Edee1F18E0157C05861564")
 	} else if opts.EthNetDetails.Name == common.EthNetworkCustom {
 
@@ -635,8 +637,7 @@ func (api *RelayAPI) startValidatorRegistrationDBProcessor() {
 	}
 }
 
-// TODO - come up with better name? state interference is not really descriptive name
-func (api *RelayAPI) StateInterferenceChecks(trace *common.CallTrace) (bool, error) {
+func (api *RelayAPI) TobTxChecks(trace *common.CallTrace) (bool, error) {
 	if api.opts.EthNetDetails.Name == common.EthNetworkCustom {
 		return api.TraceChecker(trace, api.IsTraceToWEthDaiPair)
 	} else if api.opts.EthNetDetails.Name == common.EthNetworkGoerli {
@@ -647,7 +648,7 @@ func (api *RelayAPI) StateInterferenceChecks(trace *common.CallTrace) (bool, err
 }
 
 // just check if it goes to the DaiWethPair with a swap tx
-func (api *RelayAPI) TraceChecker(trace *common.CallTrace, f common.NetworkStateInterferenceChecker) (bool, error) {
+func (api *RelayAPI) TraceChecker(trace *common.CallTrace, f common.NetworkTobTxChecker) (bool, error) {
 	stack := []common.CallTrace{*trace}
 
 	for len(stack) > 0 {
@@ -701,7 +702,6 @@ func (api *RelayAPI) IsTraceUniV3EthUsdcSwap(callTrace common.CallTrace) (bool, 
 	if err != nil {
 		return false, err
 	}
-	// TODO - we should support other uniswap smart contract calls. Support one for now.
 	exactInputSingleId := uniV3SwapRouterAbi.Methods["exactInputSingle"].ID
 	if !bytes.Equal(callTrace.Input[:4], exactInputSingleId) {
 		return false, nil
@@ -712,21 +712,30 @@ func (api *RelayAPI) IsTraceUniV3EthUsdcSwap(callTrace common.CallTrace) (bool, 
 	if err != nil {
 		return false, err
 	}
-	// TODO - this is inefficient, i was not able to cast the interface to the struct for some reason. re-visit this later
 	argBytes, err := json.Marshal(args)
 	swapRouterParams := new(contracts.ISwapRouterExactInputSingleParams)
 	err = json.Unmarshal(argBytes, swapRouterParams)
 	if err != nil {
 		return false, err
 	}
-	if swapRouterParams.TokenIn != api.defiAddresses[common.WethToken] && swapRouterParams.TokenIn != api.defiAddresses[common.UsdcToken] {
-		return false, nil
-	}
-	if swapRouterParams.TokenOut != api.defiAddresses[common.UsdcToken] && swapRouterParams.TokenOut != api.defiAddresses[common.WethToken] {
-		return false, nil
+
+	validTokenPairs := [][2]common2.Address{
+		{api.defiAddresses[common.WethToken], api.defiAddresses[common.UsdcToken]},
+		{api.defiAddresses[common.WethToken], api.defiAddresses[common.WbtcToken]},
+		{api.defiAddresses[common.WethToken], api.defiAddresses[common.DaiToken]},
 	}
 
-	return true, nil
+	// check if (tokenIn, tokenOut) == (WETH, USDC) or (USDC, WETH) or (WETH, WBTC) or (WBTC, WETH) or (WETH, DAI) or (DAI, WETH)
+	for _, tokenPairs := range validTokenPairs {
+		if swapRouterParams.TokenIn == tokenPairs[0] && swapRouterParams.TokenOut == tokenPairs[1] {
+			return true, nil
+		}
+		if swapRouterParams.TokenIn == tokenPairs[1] && swapRouterParams.TokenOut == tokenPairs[0] {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // This will change based on the state interference check
@@ -1917,31 +1926,31 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 
 // Checks the quality of the TOB txs, if it is the txs expected in a TOB
 func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log *logrus.Entry) error {
-	if len(txs) > 2 {
-		return fmt.Errorf("we support only 1 tx on the TOB currently, got %d", len(txs))
-	}
+	//// get traces
+	for i, tx := range txs {
+		// some sanity checks
+		if tx.To() == nil {
+			return fmt.Errorf("contract creation cannot be a TOB tx")
+		}
+		if i == len(txs)-1 {
+			continue
+		}
 
-	// get traces
-	firstTx := txs[0]
-	// some sanity checks
-	if firstTx.To() == nil {
-		return fmt.Errorf("contract creation cannot be a TOB tx")
-	}
+		txTraces, err := api.getTraces(context.Background(), tracerOptions{
+			log: log,
+			tx:  tx,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to get traces: %s", err.Error())
+		}
 
-	txTraces, err := api.getTraces(context.Background(), tracerOptions{
-		log: log,
-		tx:  firstTx,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get traces: %s", err.Error())
-	}
-
-	res, err := api.StateInterferenceChecks(&txTraces.Result)
-	if err != nil {
-		return fmt.Errorf("state interference checks failed with: %s", err.Error())
-	}
-	if !res {
-		return fmt.Errorf("not a valid tob tx")
+		res, err := api.TobTxChecks(&txTraces.Result)
+		if err != nil {
+			return fmt.Errorf("state interference checks failed with: %s", err.Error())
+		}
+		if !res {
+			return fmt.Errorf("not a valid tob tx")
+		}
 	}
 
 	return nil
@@ -2022,8 +2031,8 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	if len(tobTxRequest.TobTxs.Transactions) == 1 {
 		api.Respond(w, http.StatusBadRequest, "We require a payment tx along with the TOB txs!")
 	}
-	if len(tobTxRequest.TobTxs.Transactions) > 2 {
-		api.Respond(w, http.StatusBadRequest, "we support only 1 tx on the TOB currently, got %d")
+	if len(tobTxRequest.TobTxs.Transactions) > common.MaxTobTxs+1 {
+		api.Respond(w, http.StatusBadRequest, fmt.Sprintf("we support only %d txs on the TOB currently, got %d", common.MaxTobTxs, len(tobTxRequest.TobTxs.Transactions)))
 	}
 
 	api.proposerDutiesLock.RLock()

@@ -47,6 +47,7 @@ var (
 	// this is for storing DeFi addresses for state interference checks
 	DaiToken  = "dai"
 	WethToken = "weth"
+	WbtcToken = "wbtc"
 	UsdcToken = "usdc"
 	// 2 addresses are specifically in custom devnet, we have 2 pairs of Dai/Weth for arbitrage tests
 	DaiWethPair1    = "dai_weth_pair_1"
@@ -55,6 +56,8 @@ var (
 	UniswapFactory2 = "uniswap_factory_2"
 	UniV3SwapRouter = "uniswap_v3_swap_router"
 
+	// allow a max of 3 ToB txs excluding the payout
+	MaxTobTxs          = 3
 	TobGasReservations = 1000000
 )
 
@@ -960,7 +963,7 @@ type CallTraceResponse struct {
 	Result CallTrace `json:"result"`
 }
 
-type NetworkStateInterferenceChecker func(CallTrace) (bool, error)
+type NetworkTobTxChecker func(CallTrace) (bool, error)
 
 type TobValidationRequest struct {
 	TobTxs               utilbellatrix.ExecutionPayloadTransactions
