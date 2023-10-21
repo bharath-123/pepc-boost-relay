@@ -1882,6 +1882,7 @@ func (api *RelayAPI) checkSubmissionSlotDetails(w http.ResponseWriter, log *logr
 		return false
 	}
 
+	log.Infof("DEBUG: Payload Slot: %d, headSlot: %d\n", payload.Slot(), headSlot)
 	if payload.Slot() <= headSlot {
 		log.Info("submitNewBlock failed: submission for past slot")
 		api.RespondError(w, http.StatusBadRequest, "submission for past slot")
