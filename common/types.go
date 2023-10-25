@@ -59,8 +59,6 @@ var (
 	// allow a max of 3 ToB txs excluding the payout
 	MaxTobTxs          = 3
 	TobGasReservations = 1000000
-	// allow a max of 3 ToB txs excluding the payout
-	MaxTobTxs = 3
 )
 
 type EthNetworkDetails struct {
