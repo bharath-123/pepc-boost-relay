@@ -1926,7 +1926,12 @@ func (api *RelayAPI) checkBuilderEntry(w http.ResponseWriter, log *logrus.Entry,
 
 // Checks the quality of the TOB txs, if it is the txs expected in a TOB
 func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log *logrus.Entry) error {
+
+	var wg sync.WaitGroup
+
 	//// get traces
+	tracerErrors := make([]error, len(txs))
+	validationErrors := make([]error, len(txs))
 	for i, tx := range txs {
 		// some sanity checks
 		if tx.To() == nil {
@@ -1936,22 +1941,52 @@ func (api *RelayAPI) checkTobTxsStateInterference(txs []*types.Transaction, log 
 			continue
 		}
 
-		txTraces, err := api.getTraces(context.Background(), tracerOptions{
-			log: log,
-			tx:  tx,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to get traces: %s", err.Error())
-		}
+		threadIndex := i
+		threadTx := tx
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			txTraces, err := api.getTraces(context.Background(), tracerOptions{
+				log: log,
+				tx:  threadTx,
+			})
+			if err != nil {
+				tracerErrors[threadIndex] = fmt.Errorf("failed to get traces: %s", err.Error())
+				return
+			}
 
-		res, err := api.TobTxChecks(&txTraces.Result)
+			res, err := api.TobTxChecks(&txTraces.Result)
+			if err != nil {
+				validationErrors[threadIndex] = fmt.Errorf("state interference checks failed with: %s", err.Error())
+				return
+			}
+			if !res {
+				validationErrors[threadIndex] = fmt.Errorf("not a valid tob tx")
+				return
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	//if len(tracerErrors) > 0 {
+	//	return fmt.Errorf("failed to get traces")
+	//}
+	for _, err := range tracerErrors {
 		if err != nil {
-			return fmt.Errorf("state interference checks failed with: %s", err.Error())
+			return fmt.Errorf("failed to get traces")
 		}
-		if !res {
+	}
+
+	for _, err := range validationErrors {
+		if err != nil {
 			return fmt.Errorf("not a valid tob tx")
 		}
 	}
+
+	//if len(validationErrors) > 0 {
+	//	return fmt.Errorf("not a valid tob tx")
+	//}
 
 	return nil
 }
