@@ -56,6 +56,8 @@ var (
 	UniswapFactory2 = "uniswap_factory_2"
 	UniV3SwapRouter = "uniswap_v3_swap_router"
 
+	// allow a max of 3 ToB txs excluding the payout
+	MaxTobTxs          = 3
 	TobGasReservations = 1000000
 	// allow a max of 3 ToB txs excluding the payout
 	MaxTobTxs = 3
