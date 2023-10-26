@@ -2851,6 +2851,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		}
 
 		timeBeforeAssembly := time.Now().UTC()
+		prevTime := timeBeforeAssembly
 
 		log = log.WithFields(logrus.Fields{
 			"timestampBeforeAssembly": timeBeforeAssembly.UTC().UnixMilli(),
@@ -2901,6 +2902,9 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 				return
 			}
 		}
+		nextTime := time.Now().UTC()
+		pf.Assembly = uint64(nextTime.Sub(prevTime).Microseconds())
+
 	} else {
 		simResultC := make(chan *blockSimResult, 1)
 
@@ -2939,6 +2943,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		}
 
 		timeBeforeValidation := time.Now().UTC()
+		prevTime := timeBeforeValidation
 
 		log = log.WithFields(logrus.Fields{
 			"timestampBeforeValidation": timeBeforeValidation.UTC().UnixMilli(),
@@ -2946,7 +2951,6 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 
 		// Simulate block (synchronously).
 		requestErr, validationErr := api.simulateBlock(context.Background(), opts) // success/error logging happens inside
-		log.Infof("DEBUG: Simulating block hash %s", payload.BlockHash())
 		simResultC <- &blockSimResult{requestErr == nil, false, requestErr, validationErr}
 		validationDurationMs := time.Since(timeBeforeValidation).Milliseconds()
 		log = log.WithFields(logrus.Fields{
@@ -2967,12 +2971,14 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 			}
 		}
 
+		nextTime = time.Now().UTC()
+		pf.Simulation = uint64(nextTime.Sub(prevTime).Microseconds())
+
 		builderSubmission = payload
 	}
 
 	// Prepare the response data
 	getHeaderResponse, err := common.BuildGetHeaderResponse(builderSubmission, api.blsSk, api.publicKey, api.opts.EthNetDetails.DomainBuilder)
-	log.Infof("DEBUG: Blockhash in getHeaderResponse is %s\n", getHeaderResponse.BlockHash())
 	if err != nil {
 		log.WithError(err).Error("could not sign builder bid")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
@@ -3040,6 +3046,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		"profileDecodeUs":    pf.Decode,
 		"profilePrechecksUs": pf.Prechecks,
 		"profileSimUs":       pf.Simulation,
+		"profileAssemblyUs":  pf.Assembly,
 		"profileRedisUs":     pf.RedisUpdate,
 		"profileTotalUs":     pf.Total,
 	}).Info("received block from builder")
