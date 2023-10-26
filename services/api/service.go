@@ -2156,6 +2156,30 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
+	// check the highest Rob value
+	highestRobValue, err := api.redis.GetHighestRobValue(context.Background(), tx, slot, parentHash)
+	if err != nil {
+		log.WithError(err).Warn("could not get highest Rob Value")
+		api.RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	totalBidValue := new(big.Int).Add(tobTxValue, highestRobValue)
+
+	// Get the latest top bid value from Redis
+	bidIsTopBid := false
+	topBidValue, err := api.redis.GetTopBidValue(context.Background(), tx, slot, parentHash, slotDuty.Entry.Message.Pubkey.String())
+	if err != nil {
+		log.WithError(err).Error("failed to get top bid value from redis")
+		api.RespondError(w, http.StatusBadRequest, "failed to get top bid value from redis")
+		return
+	} else {
+		bidIsTopBid = totalBidValue.Cmp(topBidValue) == 1
+		log = log.WithFields(logrus.Fields{
+			"topBidValue":    topBidValue.String(),
+			"newBidIsTopBid": bidIsTopBid,
+		})
+	}
+
 	api.Respond(w, http.StatusOK, "Tob Tx submitted successfully!")
 	return
 }
