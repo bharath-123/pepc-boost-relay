@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
@@ -1335,10 +1336,12 @@ func TestSubmitTobTxs(t *testing.T) {
 			backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{tobSimulationError: nil}
 
 			tobTxReqs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
+			txHashesList := []string{}
 			for _, tx := range c.tobTxs {
 				txByte, err := tx.MarshalBinary()
 				require.NoError(t, err)
 				tobTxReqs.Transactions = append(tobTxReqs.Transactions, txByte)
+				txHashesList = append(txHashesList, tx.Hash().String())
 			}
 			txHashRoot, err := tobTxReqs.HashTreeRoot()
 			require.NoError(t, err)
@@ -1358,7 +1361,9 @@ func TestSubmitTobTxs(t *testing.T) {
 				return
 			}
 			assertTobTxs(t, backend, headSlot+1, parentHash, c.tobTxs[len(c.tobTxs)-1].Value(), txHashRoot, len(c.tobTxs))
-
+			profile, err := backend.relay.db.GetTobSubmitProfile(headSlot+1, parentHash, strings.Join(txHashesList, ","))
+			require.NoError(t, err)
+			require.NotNil(t, profile)
 		})
 	}
 }

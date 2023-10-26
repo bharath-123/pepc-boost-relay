@@ -56,6 +56,9 @@ type IDatabaseService interface {
 
 	InsertIncludedTobTx(txHash string, slot uint64, parentHash string, blockHash string) error
 	GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash(slot uint64, parentHash string, blockHash string) ([]*IncludedTobTxEntry, error)
+
+	InsertTobSubmitProfile(slot uint64, parentHash string, txHashes string, simulationDuration uint64, tracerDuration uint64, totalDuration uint64) error
+	GetTobSubmitProfile(slot uint64, parentHash string, txHashes string) (*TobSubmitProfileEntry, error)
 }
 
 type DatabaseService struct {
@@ -642,4 +645,29 @@ func (s *DatabaseService) GetIncludedTobTxsForGivenSlotAndParentHashAndBlockHash
 	query := `SELECT id, inserted_at, slot, parent_hash, block_hash, tx_hash FROM ` + vars.TableIncludedTobTxs + ` WHERE slot = $1 AND parent_hash = $2 AND block_hash = $3`
 	err = s.DB.Select(&entries, query, slot, parentHash, blockHash)
 	return entries, err
+}
+
+func (s *DatabaseService) InsertTobSubmitProfile(slot uint64, parentHash string, txHashes string, simulationDuration uint64, tracerDuration uint64, totalDuration uint64) error {
+	entry := TobSubmitProfileEntry{
+		Slot:       slot,
+		ParentHash: parentHash,
+		TxHashes:   txHashes,
+
+		SimulationDurationUs: simulationDuration,
+		TracerDurationUs:     tracerDuration,
+		TotalDurationUs:      totalDuration,
+	}
+
+	query := `INSERT INTO ` + vars.TableTobSubmitProfile + `
+		(slot, parent_hash, tx_hashes, simulation_duration_us, tracer_duration_us, total_duration_us) VALUES
+		(:slot, :parent_hash, :tx_hashes, :simulation_duration_us, :tracer_duration_us, :total_duration_us);`
+	_, err := s.DB.NamedExec(query, entry)
+	return err
+}
+
+func (s *DatabaseService) GetTobSubmitProfile(slot uint64, parentHash string, txHashes string) (entry *TobSubmitProfileEntry, err error) {
+	entries := []*TobSubmitProfileEntry{}
+	query := `SELECT id, inserted_at, slot, parent_hash, tx_hashes, simulation_duration_us, tracer_duration_us, total_duration_us FROM ` + vars.TableTobSubmitProfile + ` WHERE slot = $1 AND parent_hash = $2 AND tx_hashes = $3`
+	err = s.DB.Select(&entries, query, slot, parentHash, txHashes)
+	return entries[0], err
 }

@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -483,4 +484,33 @@ func TestIncludedTobTxs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(entries), 0)
 
+}
+
+func TestTobSubmitProfile(t *testing.T) {
+	db := resetDatabase(t)
+
+	// insert one included tx
+	slot := uint64(12345)
+	parentHash := common2.HexToHash("0xad39ea469b48da684a52b00df333d8b9062aabc1a62742154b6af1a3c4b77369")
+	txHash1 := common2.HexToHash("0x5488c797fa93bc631b0183d6e4641aa4963df50e7b8e9b82b8ec09fd5851dd33")
+	txHash2 := common2.HexToHash("0xb27c9e69ab71624e3de141e29f4389ed390bf6fc970af5404808f401a18b8019")
+
+	txHashesList := []string{txHash1.String(), txHash2.String()}
+	txHashes := strings.Join(txHashesList, ",")
+
+	totalReqDuration := uint64(100)
+	tracerDuration := uint64(50)
+	simulationDuration := uint64(10)
+
+	err := db.InsertTobSubmitProfile(slot, parentHash.String(), txHashes, simulationDuration, tracerDuration, totalReqDuration)
+	require.NoError(t, err)
+
+	tobSubmitProfile, err := db.GetTobSubmitProfile(slot, parentHash.String(), txHashes)
+	require.NoError(t, err)
+	require.Equal(t, tobSubmitProfile.Slot, slot)
+	require.Equal(t, tobSubmitProfile.ParentHash, parentHash.String())
+	require.Equal(t, tobSubmitProfile.TxHashes, txHashes)
+	require.Equal(t, tobSubmitProfile.TotalDurationUs, totalReqDuration)
+	require.Equal(t, tobSubmitProfile.SimulationDurationUs, simulationDuration)
+	require.Equal(t, tobSubmitProfile.TracerDurationUs, tracerDuration)
 }

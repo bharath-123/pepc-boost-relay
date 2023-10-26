@@ -269,3 +269,21 @@ type IncludedTobTxEntry struct {
 
 	TxHash string `db:"tx_hash"`
 }
+
+type TobSubmitProfileEntry struct {
+	ID int64 `db:"id"`
+
+	InsertedAt time.Time `db:"inserted_at"`
+
+	Slot uint64 `db:"slot"`
+
+	ParentHash string `db:"parent_hash"`
+
+	TxHashes string `db:"tx_hashes"`
+
+	SimulationDurationUs uint64 `db:"simulation_duration_us"`
+
+	TracerDurationUs uint64 `db:"tracer_duration_us"`
+
+	TotalDurationUs uint64 `db:"total_duration_us"`
+}
