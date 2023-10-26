@@ -99,6 +99,9 @@ type RedisCache struct {
 	prefixFloorBid                    string
 	prefixFloorBidValue               string
 
+	prefixHighestRob      string
+	prefixHighestRobValue string
+
 	// keys
 	keyValidatorRegistrationTimestamp string
 
@@ -142,6 +145,9 @@ func NewRedisCache(prefix, redisURI, readonlyURI string) (*RedisCache, error) {
 		prefixFloorBid:                    fmt.Sprintf("%s/%s:bid-floor", redisPrefix, prefix),                      // prefix:slot_parentHash_proposerPubkey
 		prefixFloorBidValue:               fmt.Sprintf("%s/%s:bid-floor-value", redisPrefix, prefix),                // prefix:slot_parentHash_proposerPubkey
 
+		prefixHighestRob:      fmt.Sprintf("%s/%s:highest-rob", redisPrefix, prefix),
+		prefixHighestRobValue: fmt.Sprintf("%s/%s:highest-rob-value", redisPrefix, prefix),
+
 		keyValidatorRegistrationTimestamp: fmt.Sprintf("%s/%s:validator-registration-timestamp", redisPrefix, prefix),
 		keyRelayConfig:                    fmt.Sprintf("%s/%s:relay-config", redisPrefix, prefix),
 
@@ -159,6 +165,14 @@ func (r *RedisCache) keyCacheGetTobTxs(slot uint64, parentHash string) string {
 
 func (r *RedisCache) keyCacheGetTobTxsValue(slot uint64, parentHash string) string {
 	return fmt.Sprintf("%s:%d-%s", r.prefixTopTobTxValue, slot, parentHash)
+}
+
+func (r *RedisCache) keyCacheGetHighestRob(slot uint64, parentHash string) string {
+	return fmt.Sprintf("%s:%d-%s", r.prefixHighestRob, slot, parentHash)
+}
+
+func (r *RedisCache) keyCacheGetHighestRobValue(slot uint64, parentHash string) string {
+	return fmt.Sprintf("%s:%d-%s", r.prefixHighestRobValue, slot, parentHash)
 }
 
 func (r *RedisCache) keyCacheGetHeaderResponse(slot uint64, parentHash, proposerPubkey string) string {
@@ -372,6 +386,50 @@ func (r *RedisCache) GetBestBid(slot uint64, parentHash, proposerPubkey string) 
 		return nil, nil
 	}
 	return resp, err
+}
+
+func (r *RedisCache) GetHighestRob(slot uint64, parentHash string) (*common.BuilderSubmitBlockRequest, error) {
+	key := r.keyCacheGetHighestRob(slot, parentHash)
+	resp := new(common.BuilderSubmitBlockRequest)
+	err := r.GetObj(key, resp)
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	return resp, err
+}
+
+func (r *RedisCache) SetHighestRob(slot uint64, parentHash string, highestRob *common.BuilderSubmitBlockRequest) (err error) {
+	key := r.keyCacheGetHighestRob(slot, parentHash)
+	return r.SetObj(key, highestRob, 0)
+}
+
+func (r *RedisCache) SetHighestRobValue(ctx context.Context, tx redis.Pipeliner, value *big.Int, slot uint64, parentHash string) (err error) {
+	key := r.keyCacheGetHighestRobValue(slot, parentHash)
+	err = tx.Set(ctx, key, value.String(), expiryBidCache).Err()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx)
+	return err
+}
+
+func (r *RedisCache) GetHighestRobValue(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string) (robBidValue *big.Int, err error) {
+	keyRobValue := r.keyCacheGetHighestRobValue(slot, parentHash)
+	c := tx.Get(ctx, keyRobValue)
+	_, err = tx.Exec(ctx)
+	if errors.Is(err, redis.Nil) {
+		return big.NewInt(0), nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	robBidValueStr, err := c.Result()
+	if err != nil {
+		return nil, err
+	}
+	robBidValue = new(big.Int)
+	robBidValue.SetString(robBidValueStr, 10)
+	return robBidValue, nil
 }
 
 func (r *RedisCache) SetTobTx(ctx context.Context, tx redis.Pipeliner, slot uint64, parentHash string, txs [][]byte) error {

@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math/big"
 	"sync"
@@ -509,6 +510,55 @@ func TestPipelineNilCheck(t *testing.T) {
 	f, err := cache.GetFloorBidValue(context.Background(), cache.NewPipeline(), 0, "1", "2")
 	require.NoError(t, err, err)
 	require.Equal(t, big.NewInt(0), f)
+}
+
+func TestSetHighestRob(t *testing.T) {
+	cache := setupTestRedis(t)
+
+	slot := uint64(123)
+	parentHash := "0x13e606c7b3d1faad7e83503ce3dedce4c6bb89b0c28ffb240d713c7b110b9747"
+
+	payloadJSONFilename := "../testdata/submitBlockPayloadCapella_Goerli.json.gz"
+
+	req := new(common.BuilderSubmitBlockRequest)
+	requestPayloadJSONBytes := common.LoadGzippedBytes(t, payloadJSONFilename)
+	err := json.Unmarshal(requestPayloadJSONBytes, &req)
+	require.NoError(t, err)
+
+	err = cache.SetHighestRob(slot, parentHash, req)
+	require.NoError(t, err)
+
+	res, err := cache.GetHighestRob(slot, parentHash)
+	require.NoError(t, err)
+
+	require.Equal(t, req, res)
+}
+
+func TestSetHighestRobValue(t *testing.T) {
+	cache := setupTestRedis(t)
+
+	slot := uint64(123)
+	parentHash := "0x13e606c7b3d1faad7e83503ce3dedce4c6bb89b0c28ffb240d713c7b110b9747"
+
+	// Set a value
+	value := big.NewInt(123)
+	_, err := cache.client.TxPipelined(context.Background(), func(tx redis.Pipeliner) error {
+		v, err := cache.GetHighestRobValue(context.Background(), tx, slot, parentHash)
+		require.NoError(t, err)
+		require.Equal(t, v, big.NewInt(0))
+
+		err = cache.SetHighestRobValue(context.Background(), tx, value, slot, parentHash)
+		require.NoError(t, err)
+
+		// Get the value back
+		v, err = cache.GetHighestRobValue(context.Background(), tx, slot, parentHash)
+		require.NoError(t, err)
+		require.Equal(t, v, big.NewInt(123))
+
+		return nil
+	})
+
+	require.NoError(t, err)
 }
 
 func TestSetTobTxs(t *testing.T) {
