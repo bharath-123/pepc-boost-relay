@@ -2014,6 +2014,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	})
 
 	defer func() {
+
 		log.WithFields(logrus.Fields{
 			"timestampRequestFin": time.Now().UTC().UnixMilli(),
 			"requestDurationMs":   time.Since(receivedAt).Milliseconds(),
@@ -2087,6 +2088,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	}
 	validatorFeeRecipient := slotDuty.Entry.Message.FeeRecipient
 
+	startTime := time.Now().UTC()
 	// simulate the TOB txs
 	err = api.simulateTobTxs(context.Background(), tobSimOptions{
 		log: log,
@@ -2102,6 +2104,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	simulationDuration := time.Since(startTime).Microseconds()
 
 	// decode the txs
 	transactionBytes := make([][]byte, len(tobTxRequest.TobTxs.Transactions))
@@ -2115,12 +2118,14 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
+	startTime = time.Now().UTC()
 	err = api.checkTobTxsStateInterference(txs, log)
 	if err != nil {
 		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	tracerDuration := time.Since(startTime).Microseconds()
 
 	lastTx := txs[len(txs)-1]
 
@@ -2155,6 +2160,20 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	defer func() {
+		totalDuration := time.Since(receivedAt).Microseconds()
+		txHashList := []string{}
+		for _, tx := range txs {
+			txHashList = append(txHashList, tx.Hash().String())
+		}
+		txHashes := strings.Join(txHashList, ",")
+
+		err := api.db.InsertTobSubmitProfile(slot, parentHash, txHashes, uint64(simulationDuration), uint64(tracerDuration), uint64(totalDuration))
+		if err != nil {
+			log.WithError(err).Error("failed to insert tob submit profile into db")
+		}
+	}()
 
 	api.Respond(w, http.StatusOK, "Tob Tx submitted successfully!")
 	return

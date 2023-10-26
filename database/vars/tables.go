@@ -16,4 +16,5 @@ var (
 	TableBlockedValidator       = tableBase + "_blocked_validator"
 	TableTooLateGetPayload      = tableBase + "_too_late_get_payload"
 	TableIncludedTobTxs         = tableBase + "_included_tob_txs"
+	TableTobSubmitProfile       = tableBase + "_tob_submit_profile"
 )
