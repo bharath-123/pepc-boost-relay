@@ -2812,7 +2812,6 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 				}
 			}
 
-			log.Infof("DEBUG: assembled payload: %v", res.assembledPayload)
 			// decode the txs
 			transactionBytes := make([][]byte, len(tobTxs))
 			for i, txHexBytes := range tobTxs {
