@@ -1623,21 +1623,28 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot, len(c.firstTobTxs))
 
 			// Prepare the request payload
-			blockSubmitReq := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
+			blockSubmitReq1 := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
 
-			totalExpectedBidValue := big.NewInt(0).Add(blockSubmitReq.Message().Value.ToBig(), tobTxsValue)
+			totalExpectedBidValue := big.NewInt(0).Add(blockSubmitReq1.Message().Value.ToBig(), tobTxsValue)
 
 			// Send JSON encoded request
-			reqJSONBytes, err := blockSubmitReq.Capella.MarshalJSON()
+			reqJSONBytes, err := blockSubmitReq1.Capella.MarshalJSON()
 			require.NoError(t, err)
 			require.Equal(t, 704810, len(reqJSONBytes))
-			reqJSONBytes2, err := json.Marshal(blockSubmitReq.Capella)
+			reqJSONBytes2, err := json.Marshal(blockSubmitReq1.Capella)
 			require.NoError(t, err)
 			require.Equal(t, reqJSONBytes, reqJSONBytes2)
 			rr = backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			require.Equal(t, http.StatusOK, rr.Code)
 
-			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq, totalExpectedBidValue, c.firstTobTxs)
+			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq1, totalExpectedBidValue, c.firstTobTxs)
+			txPipeliner := backend.redis.NewTxPipeline()
+			res, err := backend.redis.GetHighestRobValue(context.Background(), txPipeliner, headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, blockSubmitReq1.Value(), res)
+			highestRob, err := backend.redis.GetHighestRob(headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, blockSubmitReq1, highestRob)
 
 			// submit the second set of ToB txs
 			backend.relay.tracer = &MockTracer{
@@ -1677,21 +1684,27 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 
 			assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), txsHashRoot, len(c.secondTobTxs))
 
-			blockSubmitReq = prepareBlockSubmitRequest(t, payloadJSONFilename2, submissionSlot, uint64(submissionTimestamp), backend)
+			blockSubmitReq2 := prepareBlockSubmitRequest(t, payloadJSONFilename2, submissionSlot, uint64(submissionTimestamp), backend)
 
-			totalExpectedBidValue = big.NewInt(0).Add(blockSubmitReq.Message().Value.ToBig(), tobTxsValue)
+			totalExpectedBidValue = big.NewInt(0).Add(blockSubmitReq2.Message().Value.ToBig(), tobTxsValue)
 
 			// Send JSON encoded request
-			reqJSONBytes, err = blockSubmitReq.Capella.MarshalJSON()
+			reqJSONBytes, err = blockSubmitReq2.Capella.MarshalJSON()
 			require.NoError(t, err)
 			require.Equal(t, 704810, len(reqJSONBytes))
-			reqJSONBytes2, err = json.Marshal(blockSubmitReq.Capella)
+			reqJSONBytes2, err = json.Marshal(blockSubmitReq2.Capella)
 			require.NoError(t, err)
 			require.Equal(t, reqJSONBytes, reqJSONBytes2)
 			rr = backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			require.Equal(t, http.StatusOK, rr.Code)
 
-			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq, totalExpectedBidValue, c.secondTobTxs)
+			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq2, totalExpectedBidValue, c.secondTobTxs)
+			res, err = backend.redis.GetHighestRobValue(context.Background(), txPipeliner, headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, blockSubmitReq1.Value(), res)
+			highestRob, err = backend.redis.GetHighestRob(headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, blockSubmitReq1, highestRob)
 		})
 	}
 
@@ -1866,6 +1879,14 @@ func TestSubmitBuilderBlock(t *testing.T) {
 
 			// get the block stored in the db
 			assertBlock(t, backend, headSlot, parentHash, req, totalExpectedBidValue, c.tobTxs)
+			txPipeliner := backend.redis.NewPipeline()
+			res, err := backend.redis.GetHighestRobValue(context.Background(), txPipeliner, headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, req.Value(), res)
+			highestRob, err := backend.redis.GetHighestRob(headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, req, highestRob)
+
 		})
 	}
 }

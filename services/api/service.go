@@ -2751,6 +2751,8 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 	// THE BID WILL BE ASSEMBLED SHORTLY
 	// ---------------------------------
 
+	robBid := payload
+
 	// Get the best TOB tx value set from Redis
 	// If so proceed with assembly.
 	// check if there is a TOB tx
@@ -3004,6 +3006,28 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		BidTrace:    *builderSubmission.Message(),
 		BlockNumber: builderSubmission.BlockNumber(),
 		NumTx:       uint64(builderSubmission.NumTx()),
+	}
+
+	// cache the RoB block if it is of the highest value to rebuild with if a future high value TobTx comes in
+	robValue, err := api.redis.GetHighestRobValue(context.Background(), tx, payload.Slot(), payload.ParentHash())
+	if err != nil {
+		log.WithError(err).Error("failed to get highest rob value from redis")
+		api.RespondError(w, http.StatusInternalServerError, "failed to get highest rob value from redis")
+		return
+	}
+	if robBid.Value().Cmp(robValue) == 1 {
+		err := api.redis.SetHighestRob(payload.Slot(), payload.ParentHash(), robBid)
+		if err != nil {
+			log.WithError(err).Error("failed to set highest rob value in redis")
+			api.RespondError(w, http.StatusInternalServerError, "failed to set highest rob value in redis")
+			return
+		}
+		err = api.redis.SetHighestRobValue(context.Background(), tx, robBid.Value(), payload.Slot(), payload.ParentHash())
+		if err != nil {
+			log.WithError(err).Error("failed to set highest rob value in redis")
+			api.RespondError(w, http.StatusInternalServerError, "failed to set highest rob value in redis")
+			return
+		}
 	}
 
 	//
