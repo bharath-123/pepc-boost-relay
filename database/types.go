@@ -163,6 +163,7 @@ type BuilderBlockSubmissionEntry struct {
 	DecodeDuration       uint64 `db:"decode_duration"`
 	PrechecksDuration    uint64 `db:"prechecks_duration"`
 	SimulationDuration   uint64 `db:"simulation_duration"`
+	AssemblyDuration     uint64 `db:"assembly_duration"`
 	RedisUpdateDuration  uint64 `db:"redis_update_duration"`
 	TotalDuration        uint64 `db:"total_duration"`
 	OptimisticSubmission bool   `db:"optimistic_submission"`

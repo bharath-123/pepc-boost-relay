@@ -102,8 +102,8 @@ func (s *DatabaseService) prepareNamedQueries() (err error) {
 
 	// Insert block builder submission
 	query = `INSERT INTO ` + vars.TableBuilderBlockSubmission + `
-	(received_at, eligible_at, execution_payload_id, was_simulated, sim_success, sim_error, sim_req_error, signature, slot, parent_hash, block_hash, builder_pubkey, proposer_pubkey, proposer_fee_recipient, gas_used, gas_limit, num_tx, value, epoch, block_number, decode_duration, prechecks_duration, simulation_duration, redis_update_duration, total_duration, optimistic_submission) VALUES
-	(:received_at, :eligible_at, :execution_payload_id, :was_simulated, :sim_success, :sim_error, :sim_req_error, :signature, :slot, :parent_hash, :block_hash, :builder_pubkey, :proposer_pubkey, :proposer_fee_recipient, :gas_used, :gas_limit, :num_tx, :value, :epoch, :block_number, :decode_duration, :prechecks_duration, :simulation_duration, :redis_update_duration, :total_duration, :optimistic_submission)
+	(received_at, eligible_at, execution_payload_id, was_simulated, sim_success, sim_error, sim_req_error, signature, slot, parent_hash, block_hash, builder_pubkey, proposer_pubkey, proposer_fee_recipient, gas_used, gas_limit, num_tx, value, epoch, block_number, decode_duration, prechecks_duration, simulation_duration, assembly_duration, redis_update_duration, total_duration, optimistic_submission) VALUES
+	(:received_at, :eligible_at, :execution_payload_id, :was_simulated, :sim_success, :sim_error, :sim_req_error, :signature, :slot, :parent_hash, :block_hash, :builder_pubkey, :proposer_pubkey, :proposer_fee_recipient, :gas_used, :gas_limit, :num_tx, :value, :epoch, :block_number, :decode_duration, :prechecks_duration, :simulation_duration, :assembly_duration, :redis_update_duration, :total_duration, :optimistic_submission)
 	RETURNING id`
 	s.nstmtInsertBlockBuilderSubmission, err = s.DB.PrepareNamed(query)
 	return err
@@ -235,6 +235,7 @@ func (s *DatabaseService) SaveBuilderBlockSubmission(payload *common.BuilderSubm
 		DecodeDuration:       profile.Decode,
 		PrechecksDuration:    profile.Prechecks,
 		SimulationDuration:   profile.Simulation,
+		AssemblyDuration:     profile.Assembly,
 		RedisUpdateDuration:  profile.RedisUpdate,
 		TotalDuration:        profile.Total,
 		OptimisticSubmission: optimisticSubmission,

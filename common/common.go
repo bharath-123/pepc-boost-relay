@@ -45,6 +45,7 @@ type Profile struct {
 	Decode      uint64
 	Prechecks   uint64
 	Simulation  uint64
+	Assembly    uint64
 	RedisUpdate uint64
 	Total       uint64
 }

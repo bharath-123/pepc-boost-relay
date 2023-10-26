@@ -1172,16 +1172,23 @@ func (api *RelayAPI) handleGetProposerForSlot(w http.ResponseWriter, req *http.R
 	if err != nil {
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 	}
+	log := api.log.WithFields(logrus.Fields{
+		"method":        "handleGetProposerForSlot",
+		"headSlot":      api.headSlot.Load(),
+		"contentLength": req.ContentLength,
+	})
 
-	api.payloadAttributesLock.RLock()
-	res, ok := api.payloadAttributesBySlot[slot]
-	api.payloadAttributesLock.RUnlock()
+	api.proposerDutiesLock.RLock()
+	res, ok := api.proposerDutiesMap[slot]
+	api.proposerDutiesLock.RUnlock()
+
+	log.Infof("payload attributes: %+v", res)
 
 	if !ok {
 		api.RespondError(w, http.StatusNotFound, "slot proposer duties not found")
 		return
 	}
-	api.RespondOK(w, res.payloadAttributes.SuggestedFeeRecipient)
+	api.RespondOK(w, res.Entry.Message.FeeRecipient.String())
 }
 
 func (api *RelayAPI) handleRegisterValidator(w http.ResponseWriter, req *http.Request) {
@@ -2851,6 +2858,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		}
 
 		timeBeforeAssembly := time.Now().UTC()
+		prevTime := timeBeforeAssembly
 
 		log = log.WithFields(logrus.Fields{
 			"timestampBeforeAssembly": timeBeforeAssembly.UTC().UnixMilli(),
@@ -2901,6 +2909,9 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 				return
 			}
 		}
+		nextTime := time.Now().UTC()
+		pf.Assembly = uint64(nextTime.Sub(prevTime).Microseconds())
+
 	} else {
 		simResultC := make(chan *blockSimResult, 1)
 
@@ -2939,6 +2950,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		}
 
 		timeBeforeValidation := time.Now().UTC()
+		prevTime := timeBeforeValidation
 
 		log = log.WithFields(logrus.Fields{
 			"timestampBeforeValidation": timeBeforeValidation.UTC().UnixMilli(),
@@ -2946,7 +2958,6 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 
 		// Simulate block (synchronously).
 		requestErr, validationErr := api.simulateBlock(context.Background(), opts) // success/error logging happens inside
-		log.Infof("DEBUG: Simulating block hash %s", payload.BlockHash())
 		simResultC <- &blockSimResult{requestErr == nil, false, requestErr, validationErr}
 		validationDurationMs := time.Since(timeBeforeValidation).Milliseconds()
 		log = log.WithFields(logrus.Fields{
@@ -2967,12 +2978,14 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 			}
 		}
 
+		nextTime = time.Now().UTC()
+		pf.Simulation = uint64(nextTime.Sub(prevTime).Microseconds())
+
 		builderSubmission = payload
 	}
 
 	// Prepare the response data
 	getHeaderResponse, err := common.BuildGetHeaderResponse(builderSubmission, api.blsSk, api.publicKey, api.opts.EthNetDetails.DomainBuilder)
-	log.Infof("DEBUG: Blockhash in getHeaderResponse is %s\n", getHeaderResponse.BlockHash())
 	if err != nil {
 		log.WithError(err).Error("could not sign builder bid")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
@@ -3040,6 +3053,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		"profileDecodeUs":    pf.Decode,
 		"profilePrechecksUs": pf.Prechecks,
 		"profileSimUs":       pf.Simulation,
+		"profileAssemblyUs":  pf.Assembly,
 		"profileRedisUs":     pf.RedisUpdate,
 		"profileTotalUs":     pf.Total,
 	}).Info("received block from builder")
