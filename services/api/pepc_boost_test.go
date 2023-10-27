@@ -1628,21 +1628,28 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 			assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot, len(c.firstTobTxs))
 
 			// Prepare the request payload
-			blockSubmitReq := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
+			blockSubmitReq1 := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
 
-			totalExpectedBidValue := big.NewInt(0).Add(blockSubmitReq.Message().Value.ToBig(), tobTxsValue)
+			totalExpectedBidValue := big.NewInt(0).Add(blockSubmitReq1.Message().Value.ToBig(), tobTxsValue)
 
 			// Send JSON encoded request
-			reqJSONBytes, err := blockSubmitReq.Capella.MarshalJSON()
+			reqJSONBytes, err := blockSubmitReq1.Capella.MarshalJSON()
 			require.NoError(t, err)
 			require.Equal(t, 704810, len(reqJSONBytes))
-			reqJSONBytes2, err := json.Marshal(blockSubmitReq.Capella)
+			reqJSONBytes2, err := json.Marshal(blockSubmitReq1.Capella)
 			require.NoError(t, err)
 			require.Equal(t, reqJSONBytes, reqJSONBytes2)
 			rr = backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			require.Equal(t, http.StatusOK, rr.Code)
 
-			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq, totalExpectedBidValue, c.firstTobTxs)
+			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq1, totalExpectedBidValue, c.firstTobTxs)
+			txPipeliner := backend.redis.NewTxPipeline()
+			res, err := backend.redis.GetHighestRobValue(context.Background(), txPipeliner, headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, blockSubmitReq1.Value(), res)
+			highestRob, err := backend.redis.GetHighestRob(headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, blockSubmitReq1, highestRob)
 
 			// submit the second set of ToB txs
 			backend.relay.tracer = &MockTracer{
@@ -1682,24 +1689,219 @@ func TestSubmitBuilderBlockInSequence(t *testing.T) {
 
 			assertTobTxs(t, backend, headSlot+1, parentHash, c.secondTobTxs[len(c.secondTobTxs)-1].Value(), txsHashRoot, len(c.secondTobTxs))
 
-			blockSubmitReq = prepareBlockSubmitRequest(t, payloadJSONFilename2, submissionSlot, uint64(submissionTimestamp), backend)
+			blockSubmitReq2 := prepareBlockSubmitRequest(t, payloadJSONFilename2, submissionSlot, uint64(submissionTimestamp), backend)
 
-			totalExpectedBidValue = big.NewInt(0).Add(blockSubmitReq.Message().Value.ToBig(), tobTxsValue)
+			totalExpectedBidValue = big.NewInt(0).Add(blockSubmitReq2.Message().Value.ToBig(), tobTxsValue)
 
 			// Send JSON encoded request
-			reqJSONBytes, err = blockSubmitReq.Capella.MarshalJSON()
+			reqJSONBytes, err = blockSubmitReq2.Capella.MarshalJSON()
 			require.NoError(t, err)
 			require.Equal(t, 704810, len(reqJSONBytes))
-			reqJSONBytes2, err = json.Marshal(blockSubmitReq.Capella)
+			reqJSONBytes2, err = json.Marshal(blockSubmitReq2.Capella)
 			require.NoError(t, err)
 			require.Equal(t, reqJSONBytes, reqJSONBytes2)
 			rr = backend.requestBytes(http.MethodPost, blockSubmitPath, reqJSONBytes, nil)
 			require.Equal(t, http.StatusOK, rr.Code)
 
-			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq, totalExpectedBidValue, c.secondTobTxs)
+			assertBlock(t, backend, headSlot, parentHash, blockSubmitReq2, totalExpectedBidValue, c.secondTobTxs)
+			res, err = backend.redis.GetHighestRobValue(context.Background(), txPipeliner, headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, blockSubmitReq1.Value(), res)
+			highestRob, err = backend.redis.GetHighestRob(headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, blockSubmitReq1, highestRob)
 		})
 	}
 
+}
+
+func TestRebuildCachedRobBlock(t *testing.T) {
+	backend := newTestBackend(t, 1, common.EthNetworkCustom)
+
+	devnetTraceData := GetCustomDevnetTracingRelatedTestData(t)
+	goerliTraceData := GetGoerliTracingRelatedTestData(t)
+
+	// Payload attributes
+	parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+	prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, common.EthNetworkCustom)
+
+	backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{tobSimulationError: nil}
+
+	headSlotProposerFeeRecipient := common2.HexToAddress(backend.relay.proposerDutiesMap[headSlot+1].Entry.Message.FeeRecipient.String())
+
+	cases := []struct {
+		description   string
+		tobTxs        []*gethtypes.Transaction
+		traces        map[common2.Hash]*common.CallTrace
+		network       string
+		requiredError string
+	}{
+		{
+			description:   "No ToB txs",
+			tobTxs:        []*gethtypes.Transaction{},
+			traces:        nil,
+			network:       common.EthNetworkCustom,
+			requiredError: "",
+		},
+		{
+			description: "custom devnet ToB txs of some value are present",
+			tobTxs: []*gethtypes.Transaction{
+				devnetTraceData.ValidWethDaiTx,
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			network: common.EthNetworkCustom,
+			traces: map[common2.Hash]*common.CallTrace{
+				devnetTraceData.ValidWethDaiTx.Hash(): devnetTraceData.ValidWethDaiTxTrace,
+			},
+			requiredError: "",
+		},
+		{
+			description: "goerli ToB txs of some value are present",
+			tobTxs: []*gethtypes.Transaction{
+				goerliTraceData.ValidEthUsdcTx,
+				goerliTraceData.ValidEthWbtcTx,
+				goerliTraceData.ValidEthDaiTx,
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			network: common.EthNetworkGoerli,
+			traces: map[common2.Hash]*common.CallTrace{
+				goerliTraceData.ValidEthUsdcTx.Hash(): goerliTraceData.ValidEthUsdcTxTrace,
+				goerliTraceData.ValidEthWbtcTx.Hash(): goerliTraceData.ValidEthWbtcTxTrace,
+				goerliTraceData.ValidEthDaiTx.Hash():  goerliTraceData.ValidEthDaiTxTrace,
+			},
+			requiredError: "",
+		},
+		{
+			description: "custom devnet 3 ToB txs are present",
+			tobTxs: []*gethtypes.Transaction{
+				devnetTraceData.ValidWethDaiTx,
+				devnetTraceData.ValidWethDaiTx,
+				devnetTraceData.ValidWethDaiTx,
+				gethtypes.NewTx(&gethtypes.LegacyTx{
+					Nonce:    2,
+					GasPrice: big.NewInt(2),
+					Gas:      2,
+					To:       &headSlotProposerFeeRecipient,
+					Value:    big.NewInt(110),
+					Data:     []byte(""),
+				}),
+			},
+			network: common.EthNetworkCustom,
+			traces: map[common2.Hash]*common.CallTrace{
+				devnetTraceData.ValidWethDaiTx.Hash(): devnetTraceData.ValidWethDaiTxTrace,
+			},
+			requiredError: "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.description, func(t *testing.T) {
+			backend = newTestBackend(t, 1, c.network)
+
+			parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, headSlot := GetTestPayloadAttributes(t)
+
+			submissionSlot := headSlot + 1
+			submissionTimestamp := 1606824419
+
+			prepareBackend(t, backend, headSlot, parentHash, feeRec, withdrawalsRoot, prevRandao, proposerPubkey, c.network)
+
+			backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{tobSimulationError: nil}
+
+			if c.traces != nil {
+				backend.relay.tracer = &MockTracer{
+					tracerError:  "",
+					callTraceMap: c.traces,
+				}
+			} else {
+				backend.relay.tracer = &MockTracer{
+					tracerError:  "no traces available",
+					callTraceMap: nil,
+				}
+			}
+
+			// create the ToB txs
+			tobTxsValue := big.NewInt(0)
+			if len(c.tobTxs) > 0 {
+				req := new(common.TobTxsSubmitRequest)
+				txs := bellatrixUtil.ExecutionPayloadTransactions{Transactions: []bellatrix.Transaction{}}
+				for _, tx := range c.tobTxs {
+					txBytes, err := tx.MarshalBinary()
+					require.NoError(t, err)
+					txs.Transactions = append(txs.Transactions, txBytes)
+				}
+				txsHashRoot, err := txs.HashTreeRoot()
+				req = &common.TobTxsSubmitRequest{
+					ParentHash: parentHash,
+					TobTxs:     txs,
+					Slot:       headSlot + 1,
+				}
+				jsonReq, err := req.MarshalJSON()
+				require.NoError(t, err)
+
+				rr := backend.requestBytes(http.MethodPost, tobTxSubmitPath, jsonReq, map[string]string{
+					"Content-Type": "application/json",
+				})
+				require.Equal(t, http.StatusOK, rr.Code)
+
+				payoutTxs := c.tobTxs[len(c.tobTxs)-1]
+				tobTxsValue = payoutTxs.Value()
+				assertTobTxs(t, backend, headSlot+1, parentHash, tobTxsValue, txsHashRoot, len(c.tobTxs))
+			} else {
+				backend.relay.blockSimRateLimiter = &MockBlockSimulationRateLimiter{
+					simulationError: nil,
+				}
+			}
+
+			txPipeliner := backend.redis.NewPipeline()
+
+			// Prepare the request payload
+			req := prepareBlockSubmitRequest(t, payloadJSONFilename, submissionSlot, uint64(submissionTimestamp), backend)
+			req2 := prepareBlockSubmitRequest(t, payloadJSONFilename2, submissionSlot, uint64(submissionTimestamp), backend)
+
+			err := backend.relay.redis.SetHighestRob(headSlot+1, parentHash, req2)
+			require.NoError(t, err)
+			err = backend.relay.redis.SetHighestRobValue(context.Background(), txPipeliner, req2.Value(), headSlot+1, parentHash)
+			require.NoError(t, err)
+			totalExpectedBidValue := big.NewInt(0).Add(req2.Message().Value.ToBig(), tobTxsValue)
+
+			// Send JSON encoded request
+			reqJSONBytes, err := req.Capella.MarshalJSON()
+			require.NoError(t, err)
+
+			newSubmitBlockSubmitPath := blockSubmitPath + fmt.Sprintf("?rebuild-cached-rob-block=1&slot=%d&parent-hash=%s", headSlot+1, parentHash)
+			rr := backend.requestBytes(http.MethodPost, newSubmitBlockSubmitPath, reqJSONBytes, nil)
+			if c.requiredError != "" {
+				require.Contains(t, rr.Body.String(), c.requiredError)
+				return
+			}
+			require.Equal(t, http.StatusOK, rr.Code)
+
+			// get the block stored in the db
+			assertBlock(t, backend, headSlot, parentHash, req2, totalExpectedBidValue, c.tobTxs)
+			res, err := backend.redis.GetHighestRobValue(context.Background(), txPipeliner, headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, req2.Value(), res)
+			highestRob, err := backend.redis.GetHighestRob(headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, req2, highestRob)
+
+		})
+	}
 }
 
 func TestSubmitBuilderBlock(t *testing.T) {
@@ -1871,6 +2073,14 @@ func TestSubmitBuilderBlock(t *testing.T) {
 
 			// get the block stored in the db
 			assertBlock(t, backend, headSlot, parentHash, req, totalExpectedBidValue, c.tobTxs)
+			txPipeliner := backend.redis.NewPipeline()
+			res, err := backend.redis.GetHighestRobValue(context.Background(), txPipeliner, headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, req.Value(), res)
+			highestRob, err := backend.redis.GetHighestRob(headSlot+1, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, req, highestRob)
+
 		})
 	}
 }
