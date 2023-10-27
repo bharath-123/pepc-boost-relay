@@ -2014,6 +2014,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	})
 
 	defer func() {
+
 		log.WithFields(logrus.Fields{
 			"timestampRequestFin": time.Now().UTC().UnixMilli(),
 			"requestDurationMs":   time.Since(receivedAt).Milliseconds(),
@@ -2087,6 +2088,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 	}
 	validatorFeeRecipient := slotDuty.Entry.Message.FeeRecipient
 
+	startTime := time.Now().UTC()
 	// simulate the TOB txs
 	err = api.simulateTobTxs(context.Background(), tobSimOptions{
 		log: log,
@@ -2102,6 +2104,7 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	simulationDuration := time.Since(startTime).Microseconds()
 
 	// decode the txs
 	transactionBytes := make([][]byte, len(tobTxRequest.TobTxs.Transactions))
@@ -2115,12 +2118,14 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
+	startTime = time.Now().UTC()
 	err = api.checkTobTxsStateInterference(txs, log)
 	if err != nil {
 		log.WithError(err).Error("error validating the txs")
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	tracerDuration := time.Since(startTime).Microseconds()
 
 	lastTx := txs[len(txs)-1]
 
@@ -2156,29 +2161,43 @@ func (api *RelayAPI) handleSubmitNewTobTxs(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	// check the highest Rob value
-	highestRobValue, err := api.redis.GetHighestRobValue(context.Background(), tx, slot, parentHash)
-	if err != nil {
-		log.WithError(err).Warn("could not get highest Rob Value")
-		api.RespondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	totalBidValue := new(big.Int).Add(tobTxValue, highestRobValue)
+	defer func() {
+		totalDuration := time.Since(receivedAt).Microseconds()
+		txHashList := []string{}
+		for _, tx := range txs {
+			txHashList = append(txHashList, tx.Hash().String())
+		}
+		txHashes := strings.Join(txHashList, ",")
 
-	// Get the latest top bid value from Redis
-	bidIsTopBid := false
-	topBidValue, err := api.redis.GetTopBidValue(context.Background(), tx, slot, parentHash, slotDuty.Entry.Message.Pubkey.String())
-	if err != nil {
-		log.WithError(err).Error("failed to get top bid value from redis")
-		api.RespondError(w, http.StatusBadRequest, "failed to get top bid value from redis")
-		return
-	} else {
-		bidIsTopBid = totalBidValue.Cmp(topBidValue) == 1
-		log = log.WithFields(logrus.Fields{
-			"topBidValue":    topBidValue.String(),
-			"newBidIsTopBid": bidIsTopBid,
-		})
-	}
+		err := api.db.InsertTobSubmitProfile(slot, parentHash, txHashes, uint64(simulationDuration), uint64(tracerDuration), uint64(totalDuration))
+		if err != nil {
+			log.WithError(err).Error("failed to insert tob submit profile into db")
+		}
+
+		// check the highest Rob value
+		highestRobValue, err := api.redis.GetHighestRobValue(context.Background(), tx, slot, parentHash)
+		if err != nil {
+			log.WithError(err).Warn("could not get highest Rob Value")
+			api.RespondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		totalBidValue := new(big.Int).Add(tobTxValue, highestRobValue)
+
+		// Get the latest top bid value from Redis
+		bidIsTopBid := false
+		topBidValue, err := api.redis.GetTopBidValue(context.Background(), tx, slot, parentHash, slotDuty.Entry.Message.Pubkey.String())
+		if err != nil {
+			log.WithError(err).Error("failed to get top bid value from redis")
+			api.RespondError(w, http.StatusBadRequest, "failed to get top bid value from redis")
+			return
+		} else {
+			bidIsTopBid = totalBidValue.Cmp(topBidValue) == 1
+			log = log.WithFields(logrus.Fields{
+				"topBidValue":    topBidValue.String(),
+				"newBidIsTopBid": bidIsTopBid,
+			})
+		}
+	}()
 
 	api.Respond(w, http.StatusOK, "Tob Tx submitted successfully!")
 	return

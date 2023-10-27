@@ -18,5 +18,6 @@ var Migrations = migrate.MemoryMigrationSource{
 		Migration009BlockBuilderRemoveReference,
 		Migration010CreateIncludedTobTxs,
 		Migration011AddAssemblyDuration,
+		Migration012AddTobSubmitProfileTable,
 	},
 }
