@@ -2421,6 +2421,7 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 	var builderSubmission *common.BuilderSubmitBlockRequest
 	var eligibleAt time.Time // will be set once the bid is ready
 	if len(tobTxs) > 0 {
+		log.Info("DEBUG: Going to the block assembler!")
 		// we have a TOB tx, now assemble the block. Block assembly has the same properties as simulation but returns the final
 		// execution payload. If there are no TOB txs, we send an empty list to the assembler
 		assemblyResultC := make(chan *blockAssemblyResult, 1)
@@ -2494,6 +2495,8 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		})
 
 		blockAssemblerResponse, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
+		log.Infof("DEBUG: RequestErr is %s\n", requestErr.Error())
+		log.Infof("DEBUG: validationErr is %s\n", validationErr.Error())
 		log.Infof("DEBUG: block assembler response: BlockValue: %v", blockAssemblerResponse.BlockValue)
 		totalBidValue := big.NewInt(0).Add(blockAssemblerResponse.BlockValue, tobTxValue)
 		builderSubmission = &common.BuilderSubmitBlockRequest{
