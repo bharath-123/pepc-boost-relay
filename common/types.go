@@ -14,6 +14,7 @@ import (
 	apiv1capella "github.com/attestantio/go-eth2-client/api/v1/capella"
 	consensusspec "github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
+	capellaapi "github.com/attestantio/go-eth2-client/spec/capella"
 	consensuscapella "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	utilbellatrix "github.com/attestantio/go-eth2-client/util/bellatrix"
@@ -934,6 +935,11 @@ func (b *BlockAssemblerRequest) UnmarshalJSON(data []byte) error {
 	b.RobPayload = *blockRequest
 
 	return nil
+}
+
+type BlockAssemblerResponse struct {
+	ExecutionPayload *capellaapi.ExecutionPayload `json:"execution_payload"`
+	BlockValue       *big.Int                     `json:"block_value"`
 }
 
 // callLog is the result of LOG opCode

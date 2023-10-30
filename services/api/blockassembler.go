@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/flashbots/go-utils/cli"
 	"github.com/flashbots/go-utils/jsonrpc"
 	"github.com/flashbots/mev-boost-relay/common"
@@ -18,7 +17,7 @@ import (
 var assemblyRequestTimeout = time.Duration(cli.GetEnvInt("BLOCKASSEMBLY_TIMEOUT_MS", 60000)) * time.Millisecond
 
 type IBlockAssembler interface {
-	Send(context context.Context, request *common.BlockAssemblerRequest) (*capella.ExecutionPayload, error, error)
+	Send(context context.Context, request *common.BlockAssemblerRequest) (*common.BlockAssemblerResponse, error, error)
 }
 
 type BlockAssembler struct {
@@ -38,7 +37,7 @@ func NewBlockAssembler(blockAssemblyURL string) *BlockAssembler {
 	}
 }
 
-func (b *BlockAssembler) Send(context context.Context, request *common.BlockAssemblerRequest) (payload *capella.ExecutionPayload, requestErr, validationErr error) {
+func (b *BlockAssembler) Send(context context.Context, request *common.BlockAssemblerRequest) (payload *common.BlockAssemblerResponse, requestErr, validationErr error) {
 	b.cv.L.Lock()
 	cnt := atomic.AddInt64(&b.counter, 1)
 	if maxConcurrentBlocks > 0 && cnt > maxConcurrentBlocks {
@@ -72,7 +71,7 @@ func (b *BlockAssembler) Send(context context.Context, request *common.BlockAsse
 
 	// decode the response to engine.ExecutionPayloadEnvelope
 	if resp != nil {
-		payload = &capella.ExecutionPayload{}
+		payload = &common.BlockAssemblerResponse{}
 		err := json.Unmarshal(resp.Result, payload)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode response: %w", err), nil

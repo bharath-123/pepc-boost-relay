@@ -25,7 +25,6 @@ import (
 	v1 "github.com/attestantio/go-builder-client/api/v1"
 	"github.com/attestantio/go-eth2-client/api/v1/capella"
 	bellatrix2 "github.com/attestantio/go-eth2-client/spec/bellatrix"
-	capella2 "github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/attestantio/go-eth2-client/util/bellatrix"
 	"github.com/buger/jsonparser"
@@ -782,7 +781,7 @@ func (api *RelayAPI) getTraces(ctx context.Context, opts tracerOptions) (*common
 }
 
 // simulateBlock sends a request for a block simulation to blockSimRateLimiter.
-func (api *RelayAPI) assembleBlock(ctx context.Context, opts blockAssemblyOptions) (*capella2.ExecutionPayload, error, error) {
+func (api *RelayAPI) assembleBlock(ctx context.Context, opts blockAssemblyOptions) (*common.BlockAssemblerResponse, error, error) {
 	t := time.Now()
 	res, requestErr, validationErr := api.blockAssembler.Send(ctx, opts.req)
 	log := opts.log.WithFields(logrus.Fields{
@@ -2417,23 +2416,6 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 			api.RespondError(w, http.StatusInternalServerError, "failed to get tob tx value from redis")
 			return
 		}
-
-		totalBidValue = new(big.Int).Add(payload.Value(), tobTxValue)
-	}
-
-	// Get the latest top bid value from Redis
-	bidIsTopBid := false
-	topBidValue, err := api.redis.GetTopBidValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
-	if err != nil {
-		log.WithError(err).Error("failed to get top bid value from redis")
-		api.RespondError(w, http.StatusBadRequest, "failed to get top bid value from redis")
-		return
-	} else {
-		bidIsTopBid = totalBidValue.Cmp(topBidValue) == 1
-		log = log.WithFields(logrus.Fields{
-			"topBidValue":    topBidValue.String(),
-			"newBidIsTopBid": bidIsTopBid,
-		})
 	}
 
 	var builderSubmission *common.BuilderSubmitBlockRequest
@@ -2511,22 +2493,24 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 			"timestampBeforeAssembly": timeBeforeAssembly.UTC().UnixMilli(),
 		})
 
-		assembledPayload, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
+		blockAssemblerResponse, requestErr, validationErr := api.assembleBlock(context.Background(), opts) // success/error logging happens inside
+		log.Infof("DEBUG: block assembler response: BlockValue: %v", blockAssemblerResponse.BlockValue)
+		totalBidValue := big.NewInt(0).Add(blockAssemblerResponse.BlockValue, tobTxValue)
 		builderSubmission = &common.BuilderSubmitBlockRequest{
 			Bellatrix: payload.Bellatrix,
 			Capella: &builderCapella.SubmitBlockRequest{
 				Message: &v1.BidTrace{
 					Slot:                 payload.Message().Slot,
-					ParentHash:           assembledPayload.ParentHash,
-					BlockHash:            assembledPayload.BlockHash,
+					ParentHash:           blockAssemblerResponse.ExecutionPayload.ParentHash,
+					BlockHash:            blockAssemblerResponse.ExecutionPayload.BlockHash,
 					BuilderPubkey:        payload.Message().BuilderPubkey,
 					ProposerPubkey:       payload.Message().ProposerPubkey,
-					ProposerFeeRecipient: assembledPayload.FeeRecipient,
-					GasLimit:             assembledPayload.GasLimit,
-					GasUsed:              assembledPayload.GasUsed,
+					ProposerFeeRecipient: blockAssemblerResponse.ExecutionPayload.FeeRecipient,
+					GasLimit:             blockAssemblerResponse.ExecutionPayload.GasLimit,
+					GasUsed:              blockAssemblerResponse.ExecutionPayload.GasUsed,
 					Value:                uint256.NewInt(totalBidValue.Uint64()),
 				},
-				ExecutionPayload: assembledPayload,
+				ExecutionPayload: blockAssemblerResponse.ExecutionPayload,
 				// TODO - This signature will be invalid and we can't get the valid one since we need the builder private key
 				// we could use a set of keys from relayer to sign the message. This is a TODO for now because this signature
 				// is not being checked anywhere once the bid is stored in the db
@@ -2560,6 +2544,21 @@ func (api *RelayAPI) handleSubmitNewRobBlock(w http.ResponseWriter, req *http.Re
 		pf.Assembly = uint64(nextTime.Sub(prevTime).Microseconds())
 
 	} else {
+		// Get the latest top bid value from Redis
+		bidIsTopBid := false
+		topBidValue, err := api.redis.GetTopBidValue(context.Background(), tx, payload.Slot(), payload.ParentHash(), payload.ProposerPubkey())
+		if err != nil {
+			log.WithError(err).Error("failed to get top bid value from redis")
+			api.RespondError(w, http.StatusBadRequest, "failed to get top bid value from redis")
+			return
+		} else {
+			bidIsTopBid = totalBidValue.Cmp(topBidValue) == 1
+			log = log.WithFields(logrus.Fields{
+				"topBidValue":    topBidValue.String(),
+				"newBidIsTopBid": bidIsTopBid,
+			})
+		}
+
 		simResultC := make(chan *blockSimResult, 1)
 
 		defer func() {

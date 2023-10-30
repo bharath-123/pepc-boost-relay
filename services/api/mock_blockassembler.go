@@ -12,7 +12,7 @@ type MockBlockAssembler struct {
 	assemblerError error
 }
 
-func (m *MockBlockAssembler) Send(context context.Context, payload *common.BlockAssemblerRequest) (*capella.ExecutionPayload, error, error) {
+func (m *MockBlockAssembler) Send(context context.Context, payload *common.BlockAssemblerRequest) (*common.BlockAssemblerResponse, error, error) {
 	if m.assemblerError != nil {
 		return nil, nil, m.assemblerError
 	}
@@ -33,5 +33,8 @@ func (m *MockBlockAssembler) Send(context context.Context, payload *common.Block
 		BlockHash:    payload.RobPayload.Capella.Message.BlockHash,
 	}
 
-	return finalPayload, nil, m.assemblerError
+	return &common.BlockAssemblerResponse{
+		ExecutionPayload: finalPayload,
+		BlockValue:       payload.RobPayload.Value(),
+	}, nil, m.assemblerError
 }
